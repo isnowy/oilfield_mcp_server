@@ -1,0 +1,33 @@
+version: 1.1.7
+
+# MCP 服务器配置
+mcpServers:
+  oilfield-data:
+    # 使用 Python 运行您的 MCP 服务器
+    command: python
+    args:
+      - "d:/work/oilMCP/oilfield_mcp_server.py"
+    
+    # 环境变量配置
+    env:
+      PYTHONIOENCODING: "utf-8"
+      LOG_LEVEL: "INFO"
+      # 开发模式：true=跳过权限检查（测试用），false=启用严格权限（生产用）
+      DEV_MODE: "true"
+    
+    # 描述信息
+    description: "油田钻井数据查询服务 - 支持单井查询、多井对比、日报周报生成"
+    
+    # 是否默认启用
+    disabled: false
+
+# MCP 全局设置
+mcp:
+  # 是否启用 MCP 功能
+  enabled: true
+  
+  # 超时设置（毫秒）
+  timeout: 30000
+  
+  # 最大并发连接数
+  maxConnections: 10

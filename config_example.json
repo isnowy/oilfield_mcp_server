@@ -1,0 +1,13 @@
+{
+  "mcpServers": {
+    "oilfield-intel": {
+      "command": "python",
+      "args": [
+        "d:/work/joyagent/gemini-ge/oilfield_mcp_server.py"
+      ],
+      "env": {
+        "USER_ROLE": "admin"
+      }
+    }
+  }
+}
