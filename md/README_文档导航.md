@@ -6,34 +6,23 @@
 
 **新用户从这里开始**：
 
-1. **[stdio_vs_http_完整对比.md](stdio_vs_http_完整对比.md)** ⭐ 
-   - 先看这个，了解两种方案的区别
-   - 决定使用哪个方案
-   - 包含详细对比和推荐
+📖 **[PERMISSION_SOLUTION_COMPARISON.md](PERMISSION_SOLUTION_COMPARISON.md)** ⭐ **【完整权限方案对比指南】**
+- 整合了所有三种权限实现方案
+- 详细对比分析各方案优缺点
+- 包含完整的实现代码和步骤
+- 常见问题解决方案
+- **推荐阅读：这是权限配置的权威指南**
 
-2. 根据你的选择：
+---
 
-   **方案A: HTTP/SSE（推荐）**
-   - **[HTTP方案实施指南.md](HTTP方案实施指南.md)** - 完整操作流程
-   - 更简单、更灵活、更现代
-   
-   **方案B: stdio + ACL**
-   - **[快速开始-ACL方案.md](快速开始-ACL方案.md)** - 5分钟快速开始
-   - **[实施方案总结.md](实施方案总结.md)** - 详细实施指南
+### 具体方案文件
 
-### 📚 深入理解
+#### 方案1：Stdio + 数据库 + ACL（快速方案）
+- **[HTTP方案实施指南.md](HTTP方案实施指南.md)** - 完整操作流程
+- **[实施方案总结.md](实施方案总结.md)** - 详细实施指南
 
-#### 问题分析
-- **[问题根源和解决方案.md](问题根源和解决方案.md)**
-  - 为什么占位符不被替换？
-  - stdio类型的限制是什么？
-  - 方案选择指南
-
-#### 技术方案
-- **[LibreChat_MCP权限配置最终方案.md](LibreChat_MCP权限配置最终方案.md)**
-  - 3种方案详细对比
-  - 常见问题解答
-  - 技术深度解析
+#### 方案2：HTTP Server（推荐生产）
+- 详见 **[PERMISSION_SOLUTION_COMPARISON.md](PERMISSION_SOLUTION_COMPARISON.md)** 第二部分
 
 #### 操作指南
 - **[UI配置MCP权限操作指南.md](UI配置MCP权限操作指南.md)**
@@ -100,83 +89,56 @@ node scripts\configure-mcp-acl.js <server-name> USER
 #### 路径1: 快速实施（推荐新手）
 
 ```
-1. 阅读 stdio_vs_http_完整对比.md (10分钟)
+1. 阅读 PERMISSION_SOLUTION_COMPARISON.md (30分钟)
+   - 了解三种方案的区别
+   - 选择最适合的方案
    ↓
-2. 选择方案
-   ↓
-3a. HTTP方案 → HTTP方案实施指南.md (20分钟实施)
+2a. 方案1 → HTTP方案实施指南.md (20分钟实施)
    或
-3b. stdio方案 → 快速开始-ACL方案.md (10分钟实施)
+2b. 方案2 → PERMISSION_SOLUTION_COMPARISON.md第二部分 (30分钟实施)
+   或
+2c. 方案3 → PERMISSION_SOLUTION_COMPARISON.md第三部分 (1小时实施)
    ↓
-4. 完成！开始使用
+3. 完成！开始使用
 ```
 
 #### 路径2: 深入理解（推荐开发者）
 
 ```
-1. 问题根源和解决方案.md (理解问题本质)
+1. PERMISSION_SOLUTION_COMPARISON.md (完整指南)
    ↓
-2. LibreChat_MCP权限配置最终方案.md (了解所有方案)
+2. 查看相应方案的详细实现代码
    ↓
-3. stdio_vs_http_完整对比.md (详细对比)
+3. 在本地测试
    ↓
-4. 选择并实施方案
-   ↓
-5. 阅读相应的详细指南
+4. 部署到生产环境
 ```
 
 #### 路径3: 故障排除
 
 ```
-遇到问题 → 查看对应指南的"故障排除"章节
+遇到问题 → 查看 PERMISSION_SOLUTION_COMPARISON.md 的"第六部分：常见问题解决"
    ↓
 未解决 → 查看 UI配置MCP权限操作指南.md 的故障排除
    ↓
-仍未解决 → 查看 问题根源和解决方案.md 理解原理
+仍未解决 → 查看 PERMISSION_SOLUTION_COMPARISON.md 理解原理和架构
 ```
 
 ## 🚀 方案推荐
 
 ### 我应该选择哪个方案？
 
-#### 选择 **HTTP/SSE方案** ✅，如果：
+**详见 [PERMISSION_SOLUTION_COMPARISON.md](PERMISSION_SOLUTION_COMPARISON.md) 第二部分和第三部分**
 
-- ✅ 你是新项目，刚开始配置
-- ✅ 需要灵活的权限控制
-- ✅ 计划频繁添加新工具或角色
-- ✅ 需要生产级别的部署
-- ✅ 团队熟悉HTTP/REST API
+#### 快速参考
 
-**优势**：
-- 配置简单（3步完成）
-- 资源占用少（单进程）
-- 迭代速度快（分钟级更新）
-- 易于监控和调试
+| 方案 | 难度 | 推荐度 | 最佳场景 | 实施时间 |
+|------|------|--------|---------|---------|
+| 方案1: 数据库+ACL | ⭐⭐ | ⭐⭐⭐⭐ | 快速原型、小团队 | 5分钟 |
+| 方案2: HTTP Server | ⭐⭐⭐ | ⭐⭐⭐⭐⭐ | 生产环境、长期方案 | 30分钟 |
+| 方案3: 数据库查询 | ⭐⭐⭐⭐ | ⭐ | 过渡方案 | 1小时+ |
 
-**开始**：
-1. 阅读 [HTTP方案实施指南.md](HTTP方案实施指南.md)
-2. 执行 `pip install -r requirements_http.txt`
-3. 运行 `python oilfield_mcp_http_server.py`
-4. 配置 librechat.yaml
-5. 完成！
-
-#### 选择 **stdio + ACL方案**，如果：
-
-- ✅ 已有stdio MCP Server在运行
-- ✅ 不想部署额外的HTTP服务
-- ✅ 用户角色固定，很少变化
-- ✅ 更熟悉LibreChat的内部机制
-
-**优势**：
-- 无需额外HTTP服务
-- 利用LibreChat原生ACL
-- 进程管理由LibreChat负责
-
-**开始**：
-1. 阅读 [快速开始-ACL方案.md](快速开始-ACL方案.md)
-2. 运行创建脚本
-3. 配置ACL权限
-4. 完成！
+**推荐：使用方案2 (HTTP Server) 作为生产环境的长期方案**
 
 ## 📊 功能对照
 
@@ -268,50 +230,67 @@ node scripts\flush-cache.js
 
 ## 💡 最佳实践
 
-### 开发环境
+### 立即开始
 
-1. **使用HTTP方案** - 更容易调试和测试
+1. 📖 **阅读** [PERMISSION_SOLUTION_COMPARISON.md](PERMISSION_SOLUTION_COMPARISON.md)
+   - 了解三种方案的完整对比
+   - 选择最适合的实现方案
+
+2. 🎯 **选择方案**
+   - 方案1: 快速原型（5分钟）
+   - 方案2: 生产环境（30分钟）✅ 推荐
+   - 方案3: 过渡方案（不推荐）
+
+3. 🚀 **按步骤实施**
+   - 查看相应方案的具体步骤
+   - 执行配置命令
+   - 进行测试验证
+
+4. ✅ **测试验证**
+   - 使用权限测试脚本
+   - 不同角色测试
+   - 确保功能正常
+
+### 开发环境建议
+
+1. **使用方案2 (HTTP方案)** - 更容易调试和测试
 2. **启用详细日志** - 便于问题排查
 3. **频繁测试** - 每次修改后立即验证
 
-### 生产环境
+### 生产环境建议
 
-1. **HTTP方案推荐配置**：
+1. **使用方案2 (HTTP方案)** 推荐配置：
    - 使用Systemd或Docker管理进程
    - 配置Nginx反向代理
    - 启用HTTPS
    - 配置监控和告警
 
-2. **stdio方案推荐配置**：
-   - 定期备份ACL配置
-   - 监控所有MCP进程
-   - 文档化所有角色和权限
-
-### 安全建议
-
-1. **JWT Token管理**
-   - 不要保存token到文件
-   - 定期更换token
-   - 限制token有效期
-
-2. **数据库安全**
-   - 定期备份
-   - 限制访问权限
-   - 加密敏感数据
-
-3. **权限最小化**
-   - 只授予必要权限
-   - 定期审查用户角色
-   - 记录权限变更
+2. **安全建议**：
+   - 定期备份配置
+   - 监控所有进程
+   - 记录操作审计日志
+   - 限制权限访问
 
 ## 📞 获取帮助
 
+### 完整的文档体系
+
+👉 **[PERMISSION_SOLUTION_COMPARISON.md](PERMISSION_SOLUTION_COMPARISON.md)** 是权限配置的权威指南，包含：
+
+- ✅ 三种方案的完整原理说明
+- ✅ 详细的实现代码和步骤
+- ✅ 权限体系和权限矩阵
+- ✅ 常见问题解决方案（第六部分）
+- ✅ 安全建议（第七部分）
+- ✅ 测试验证指南（第八部分）
+- ✅ 迁移指南（第九部分）
+
 ### 常见问题
 
-先查看各指南中的"故障排除"章节：
-- [HTTP方案实施指南.md - 故障排除](HTTP方案实施指南.md#故障排除)
-- [UI配置MCP权限操作指南.md - 故障排除](UI配置MCP权限操作指南.md#故障排除)
-- [实施方案总结.md - 故障排除](实施方案总结.md#-故障排除)
+先查看以下文档中的"常见问题"或"故障排除"章节：
+- **[PERMISSION_SOLUTION_COMPARISON.md](PERMISSION_SOLUTION_COMPARISON.md)** - 第六部分
+- **[UI配置MCP权限操作指南.md](UI配置MCP权限操作指南.md)** - 故障排除章节
+- **[HTTP方案实施指南.md](HTTP方案实施指南.md)** - 常见问题
 
 ### 调试步骤
 
@@ -338,18 +317,29 @@ node scripts\flush-cache.js
 
 你现在拥有：
 
-✅ **完整的文档体系** - 从快速开始到深入理解
-✅ **两种实施方案** - 灵活选择最适合的
-✅ **详细的操作指南** - 每一步都有说明
-✅ **实用的脚本工具** - 自动化配置和测试
-✅ **故障排除指南** - 快速解决问题
+✅ **统一的权限方案指南** - [PERMISSION_SOLUTION_COMPARISON.md](PERMISSION_SOLUTION_COMPARISON.md)
+   - 整合了所有三种方案
+   - 详细的对比分析
+   - 完整的实现代码
+
+✅ **快速实施指南** - [HTTP方案实施指南.md](HTTP方案实施指南.md)
+   - 30分钟完成部署
+
+✅ **详细的故障排除** - 各文档的专项指南
+
+✅ **安全最佳实践** - PERMISSION_SOLUTION_COMPARISON.md 第七部分
+
+✅ **迁移升级路径** - PERMISSION_SOLUTION_COMPARISON.md 第九部分
 
 **下一步**：
 
-1. 📖 阅读 [stdio_vs_http_完整对比.md](stdio_vs_http_完整对比.md)
-2. 🎯 选择适合你的方案
-3. 🚀 按照相应指南实施
-4. ✅ 测试并验证功能
-5. 🎊 开始使用LibreChat的MCP权限系统！
+1. 📖 打开 [PERMISSION_SOLUTION_COMPARISON.md](PERMISSION_SOLUTION_COMPARISON.md)
+2. 了解三种方案（5-10分钟）
+3. 选择最适合的方案
+4. 按步骤实施（5分钟到1小时）
+5. 测试验证
+6. 🎊 开始使用LibreChat的MCP权限系统！
+
+**推荐：选择方案2 (HTTP Server) 作为生产环境方案**
 
 祝你实施顺利！🎉
