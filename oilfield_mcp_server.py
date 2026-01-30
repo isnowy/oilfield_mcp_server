@@ -979,22 +979,87 @@ def get_well_casing(
 # 模块 2: 日报查询与NPT分析
 # ==========================================
 
+# 添加查询缓存避免重复调用
+_daily_report_cache = {}
+_cache_ttl = 60  # 缓存有效期60秒
+
 @mcp.tool()
 @AuditLog.trace("get_daily_report")
 def get_daily_report(
     well_id: str = Field(..., description="井号，支持中文井号如'中102'"),
-    date: str = Field(..., description="日期，支持格式：'YYYY-MM-DD'、'昨天'、'yesterday'、'today'等"),
+    date: str = Field(default="", description="日期格式：YYYY-MM-DD（如'2023-11-10'）。⚠️ 只有当用户明确说出具体日期时才填写，否则留空，系统会列出可用日期供选择。"),
     user_role: str = Field("default", description="当前用户角色")
 ) -> str:
     """
     [场景] 查询某天的钻井日报（DDR）。支持模糊时间描述。
     [关键词] 日报、DDR、当天作业、每日报告、昨天、今天
     
+    ⚠️ 重要说明：
+    1. 此工具会自动处理日期格式，请只调用一次，不要重复调用！
+    2. 只有当用户明确说出具体日期时才填写date参数（如'2023-11-10'、'昨天'），其他情况一律留空
+    3. 如果用户说"查询某井的日报"但没说日期，date参数必须留空，系统会列出可用日期
+    4. 绝不要猜测日期或多次尝试！
+    
     参考 many-tool.md 第1877-1880行，支持模糊时间描述如"昨天"、"yesterday"等。
     """
-    # 归一化井号和日期
+    # 归一化井号
     well_id = normalize_well_id(well_id)
+    
+    # 扩大空值判断：包括空字符串、None、或者模糊表达（如"最新"、"今天"）
+    # 如果用户说的是模糊词汇，也应该先展示可用日期
+    ambiguous_keywords = ["最新", "latest", "recent", "当前", "current", "now"]
+    is_empty_or_ambiguous = (
+        not date or 
+        date.strip() == "" or
+        date.lower().strip() in ambiguous_keywords
+    )
+    
+    # 如果用户未提供明确日期，列出最近可用的日报供选择
+    if is_empty_or_ambiguous:
+        session = Session()
+        try:
+            # 查询该井最近的5条日报记录
+            recent_reports = session.query(DailyReport)\
+                .filter_by(well_id=well_id)\
+                .order_by(DailyReport.report_date.desc())\
+                .limit(5)\
+                .all()
+            
+            if not recent_reports:
+                return f"❌ 未找到井号 {well_id} 的任何日报记录。"
+            
+            # 生成日期列表
+            date_list = []
+            for report in recent_reports:
+                date_list.append(f"- {report.report_date} (井深: {report.current_depth}m, 进尺: {report.progress}m)")
+            
+            return f"""
+### ℹ️ 请明确查询日期
+
+您查询的是 **{well_id}** 的日报，但未指定具体日期。
+
+以下是该井最近的日报记录：
+
+{chr(10).join(date_list)}
+
+**请明确指定日期**，例如：
+- "查询 {well_id} 在 {recent_reports[0].report_date} 的日报"
+- "查询 {well_id} 昨天的日报"
+- "查询 {well_id} 最新的日报"（将查询 {recent_reports[0].report_date}）
+"""
+        finally:
+            session.close()
+    
+    # 归一化日期
     date = normalize_date(date)
+    
+    # 检查缓存
+    cache_key = f"{well_id}_{date}_{user_role}"
+    if cache_key in _daily_report_cache:
+        cache_time, cached_result = _daily_report_cache[cache_key]
+        if (datetime.now() - cache_time).seconds < _cache_ttl:
+            logger.info(f"✅ 使用缓存数据: {cache_key}")
+            return cached_result
     
     if not PermissionService.check_well_access(user_role, well_id):
         return f"🚫 权限拒绝：无权访问井号 {well_id}。"
@@ -1003,7 +1068,8 @@ def get_daily_report(
     try:
         report_date = datetime.strptime(date, "%Y-%m-%d").date()
     except ValueError:
-        return f"❌ 日期格式错误：{date}"
+        logger.warning(f"日期格式错误：{date}，原始输入可能未被正确归一化")
+        return f"❌ 日期格式错误：{date}。请使用标准格式 YYYY-MM-DD（如 2023-11-10）或使用'昨天'、'today'等。系统已自动尝试转换，但转换失败。"
     
     session = Session()
     try:
@@ -1022,7 +1088,7 @@ def get_daily_report(
                 npt_list.append(f"- {npt.category} ({npt.duration}小时，{npt.severity}): {npt.description}")
             npt_summary = "\n".join(npt_list)
         
-        return f"""
+        result = f"""
 ### 📋 钻井日报：{well_id} - {date} (报告编号：{report.report_no})
 
 #### 基本信息
@@ -1045,6 +1111,10 @@ def get_daily_report(
 #### 非生产时间(NPT)
 {npt_summary}
 """
+        
+        # 保存到缓存
+        _daily_report_cache[cache_key] = (datetime.now(), result)
+        return result
     
     finally:
         session.close()

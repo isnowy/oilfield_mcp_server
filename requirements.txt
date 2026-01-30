@@ -10,6 +10,7 @@ meilisearch>=0.31.0
 
 # Data processing
 pandas>=2.0.0
+pyarrow>=14.0.0  # 避免 pandas 3.0 前的 PyArrow 弃用警告
 tabulate>=0.9.0
 
 # Logging and utilities

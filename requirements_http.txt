@@ -1,0 +1,13 @@
+# requirements_http.txt
+# HTTP/SSE版本MCP Server依赖
+
+# Web框架
+fastapi>=0.109.0
+uvicorn[standard]>=0.27.0
+pydantic>=2.11.0
+
+# MCP SDK
+mcp>=1.26.0
+
+# 其他依赖（如果需要）
+python-multipart>=0.0.9

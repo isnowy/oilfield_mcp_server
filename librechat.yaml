@@ -2,6 +2,7 @@ version: 1.1.7
 
 # MCP 服务器配置
 mcpServers:
+  # Stdio 版本（原有配置）
   oilfield-data:
     # 使用 Python 运行您的 MCP 服务器
     command: python
@@ -17,6 +18,18 @@ mcpServers:
     
     # 描述信息
     description: "油田钻井数据查询服务 - 支持单井查询、多井对比、日报周报生成"
+    
+    # 是否默认启用
+    disabled: true  # 禁用 stdio 版本，使用 HTTP 版本
+
+  # HTTP/SSE 版本（新配置）
+  oilfield-drilling:
+    # 使用 HTTP/SSE 传输
+    transport: "sse"
+    url: "http://localhost:8080/sse"
+    
+    # 描述信息
+    description: "油田钻井数据查询服务(HTTP版) - 支持单井查询、多井对比、日报周报生成"
     
     # 是否默认启用
     disabled: false
