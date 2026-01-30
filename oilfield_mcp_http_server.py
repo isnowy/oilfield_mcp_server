@@ -52,10 +52,36 @@ DEV_MODE = os.getenv("DEV_MODE", "true").lower() in ["true", "1", "yes"]
 
 # 权限配置 - 可以从配置文件或环境变量加载
 USER_PERMISSIONS = {
-    "ADMIN": {"wells": "*", "blocks": "*", "role": "admin"},
-    "ENGINEER": {"wells": ["ZT-102", "ZT-105"], "blocks": ["Block-A"], "role": "engineer"},
-    "VIEWER": {"wells": ["ZT-102"], "blocks": ["Block-A"], "role": "viewer"},
-    "GUEST": {"wells": [], "blocks": [], "role": "guest"}
+    "ADMIN": {
+        "wells": "*",           # 所有井
+        "blocks": "*",          # 所有区块
+        "role": "admin",
+        "description": "管理员 - 完全访问权限"
+    },
+    "ENGINEER": {
+        "wells": ["ZT-102", "ZT-105"],  # 指定井列表
+        "blocks": ["Block-A"],
+        "role": "engineer",
+        "description": "工程师 - Block-A的部分井 + 公共数据"
+    },
+    "VIEWER": {
+        "wells": ["ZT-102"],    # 指定井列表
+        "blocks": ["Block-A"],
+        "role": "viewer",
+        "description": "查看者 - ZT-102只读 + 公共数据"
+    },
+    "USER": {
+        "wells": [],            # 空列表表示只能看公共数据
+        "blocks": [],
+        "role": "user",
+        "description": "普通用户 - 仅公共数据"
+    },
+    "GUEST": {
+        "wells": [],            # 空列表表示只能看公共数据
+        "blocks": [],
+        "role": "guest",
+        "description": "访客 - 仅公共数据"
+    }
 }
 
 # ==========================================
@@ -110,29 +136,45 @@ class PermissionService:
 
 def filter_wells_by_permission(wells: List[Any], user_role: str, user_id: str, user_email: str) -> List[Any]:
     """
-    根据用户角色和ID过滤井数据（基于数据所有权）
+    根据用户角色过滤井数据（基于角色权限）
     
     权限规则：
     - ADMIN: 可以查看所有井
-    - 其他角色: 只能查看自己拥有的井 + 公共数据（owner_user_id为None）
+    - ENGINEER/VIEWER: 根据USER_PERMISSIONS配置的井列表
+    - USER/GUEST: 只能查看公共数据（owner_user_id为None）
     """
     if DEV_MODE:
-        logger.info(f"🔓 开发模式：用户 {user_email} 访问所有数据")
+        logger.info(f"🔓 开发模式：用户 {user_email} ({user_role}) 访问所有数据")
         return wells
     
-    if user_role and user_role.upper() == "ADMIN":
+    role_upper = user_role.upper() if user_role else "GUEST"
+    
+    # ADMIN角色：查看所有井
+    if role_upper == "ADMIN":
         logger.info(f"✅ ADMIN用户 {user_email} 访问所有 {len(wells)} 口井")
         return wells
     
-    # 普通用户只能看到：
-    # 1. owner_user_id 是自己的
-    # 2. owner_user_id 为 None 的公共数据
-    filtered = [
-        well for well in wells
-        if well.owner_user_id == user_id or well.owner_user_id is None
-    ]
-    logger.info(f"🔒 用户 {user_email} ({user_role}) 访问 {len(filtered)}/{len(wells)} 口井")
-    return filtered
+    # 获取角色权限配置
+    perms = USER_PERMISSIONS.get(role_upper, USER_PERMISSIONS["GUEST"])
+    allowed_wells = perms.get("wells", [])
+    
+    # 如果配置了特定的井列表
+    if allowed_wells == "*":
+        logger.info(f"✅ {role_upper}用户 {user_email} 访问所有 {len(wells)} 口井")
+        return wells
+    elif allowed_wells:
+        # 过滤出权限列表中的井 + 公共数据
+        filtered = [
+            well for well in wells
+            if well.id in allowed_wells or well.owner_user_id is None
+        ]
+        logger.info(f"🔒 {role_upper}用户 {user_email} 访问 {len(filtered)}/{len(wells)} 口井（权限配置+公共数据）")
+        return filtered
+    else:
+        # 普通USER或GUEST：只能看公共数据
+        filtered = [well for well in wells if well.owner_user_id is None]
+        logger.info(f"🔒 {role_upper}用户 {user_email} 访问 {len(filtered)}/{len(wells)} 口井（仅公共数据）")
+        return filtered
 
 class AuditLog:
     """装饰器：用于记录工具调用的输入、输出、耗时和状态"""
@@ -282,28 +324,60 @@ def seed_mock_data():
         logger.info("📝 开始初始化模拟数据...")
         
         wells = [
+            # 私有数据井（user1）
             Well(id="ZT-102", name="中塔-102", block="Block-A", target_depth=4500, 
                  spud_date=date(2023, 10, 1), status="Active", well_type="Horizontal",
                  team="Team-701", rig="Rig-50",
                  owner_user_id="697c0cbebb4a93216518c3f9", owner_email="user1@test.com"),
+            
+            # 私有数据井（user2）
             Well(id="ZT-105", name="中塔-105", block="Block-A", target_depth=4200,
                  spud_date=date(2023, 10, 5), status="Active", well_type="Vertical",
                  team="Team-702", rig="Rig-51",
                  owner_user_id="697c0cbebb4a93216518c3fd", owner_email="user2@test.com"),
-            Well(id="ZT-108", name="中塔-108", block="Block-A", target_depth=5000,
-                 spud_date=date(2023, 9, 20), status="Completed", well_type="Directional",
-                 team="Team-701", rig="Rig-50",
-                 owner_user_id=None, owner_email=None),  # 公共数据
+            
+            # 私有数据井（user1）
             Well(id="XY-009", name="新疆-009", block="Block-B", target_depth=5500,
                  spud_date=date(2023, 9, 15), status="Active", well_type="Horizontal",
                  team="Team-808", rig="Rig-88",
                  owner_user_id="697c0cbebb4a93216518c3f9", owner_email="user1@test.com"),
+            
+            # ===== 以下是公共数据井 =====
+            Well(id="ZT-108", name="中塔-108", block="Block-A", target_depth=5000,
+                 spud_date=date(2023, 9, 20), status="Completed", well_type="Directional",
+                 team="Team-701", rig="Rig-50",
+                 owner_user_id=None, owner_email=None),
+            
+            Well(id="ZT-201", name="中塔-201", block="Block-A", target_depth=4800,
+                 spud_date=date(2023, 11, 10), status="Active", well_type="Horizontal",
+                 team="Team-703", rig="Rig-52",
+                 owner_user_id=None, owner_email=None),
+            
+            Well(id="XY-015", name="新疆-015", block="Block-B", target_depth=5200,
+                 spud_date=date(2023, 10, 20), status="Active", well_type="Vertical",
+                 team="Team-809", rig="Rig-89",
+                 owner_user_id=None, owner_email=None),
+            
+            Well(id="DG-088", name="东港-088", block="Block-C", target_depth=3800,
+                 spud_date=date(2023, 11, 1), status="Active", well_type="Directional",
+                 team="Team-901", rig="Rig-91",
+                 owner_user_id=None, owner_email=None),
+            
+            Well(id="DG-092", name="东港-092", block="Block-C", target_depth=4100,
+                 spud_date=date(2023, 10, 15), status="Completed", well_type="Horizontal",
+                 team="Team-902", rig="Rig-92",
+                 owner_user_id=None, owner_email=None),
+            
+            Well(id="HB-156", name="华北-156", block="Block-D", target_depth=4600,
+                 spud_date=date(2023, 9, 25), status="Active", well_type="Horizontal",
+                 team="Team-1001", rig="Rig-101",
+                 owner_user_id=None, owner_email=None),
         ]
         session.add_all(wells)
         
         base_date = date(2023, 11, 1)
         
-        # ZT-102: 正常钻进 + 一次井漏事故
+        # ZT-102: 正常钻进 + 一次井漏事故（私有数据）
         for i in range(10):
             report_date = base_date + timedelta(days=i)
             is_npt_day = (i == 5)
@@ -337,7 +411,7 @@ def seed_mock_data():
             
             session.add(r)
         
-        # ZT-105: 快速钻井
+        # ZT-105: 快速钻井（私有数据）
         for i in range(10):
             report_date = base_date + timedelta(days=i)
             r = DailyReport(
@@ -355,6 +429,211 @@ def seed_mock_data():
                 next_plan="继续正常钻进"
             )
             session.add(r)
+        
+        # ZT-201: 公共数据井 - 水平井，有一次卡钻事故
+        for i in range(12):
+            report_date = base_date + timedelta(days=i)
+            is_npt_day = (i == 7)
+            
+            progress = 120 if not is_npt_day else 40
+            current_depth = 2800 + sum([120 if j != 7 else 40 for j in range(i + 1)])
+            
+            r = DailyReport(
+                well_id="ZT-201",
+                report_date=report_date,
+                report_no=15 + i,
+                current_depth=current_depth,
+                progress=progress,
+                mud_density=1.26,
+                mud_viscosity=58.0 + i * 0.3,
+                mud_ph=9.6,
+                avg_rop=20.0 if not is_npt_day else 6.5,
+                bit_number=2 if i < 8 else 3,
+                operation_summary=f"钻进12.25寸井段，{'遭遇卡钻，倒划眼处理' if is_npt_day else '正常钻进'}。当前井深{current_depth}米。",
+                next_plan="继续钻进至设计井深" if not is_npt_day else "加强泥浆性能，防止卡钻"
+            )
+            
+            if is_npt_day:
+                npt = NPTEvent(
+                    category="Stuck Pipe",
+                    duration=18.0,
+                    severity="High",
+                    description="井深3640米处发生卡钻，上提悬重120吨，倒划眼18小时解卡成功。"
+                )
+                r.npt_events.append(npt)
+            
+            session.add(r)
+        
+        # XY-015: 公共数据井 - 直井，钻进平稳
+        for i in range(15):
+            report_date = base_date + timedelta(days=i)
+            
+            progress = 160 + i * 2
+            current_depth = 2500 + sum([160 + j * 2 for j in range(i + 1)])
+            
+            r = DailyReport(
+                well_id="XY-015",
+                report_date=report_date,
+                report_no=10 + i,
+                current_depth=current_depth,
+                progress=progress,
+                mud_density=1.20,
+                mud_viscosity=50.0,
+                mud_ph=9.8,
+                avg_rop=28.0 + i * 0.5,
+                bit_number=1 if i < 10 else 2,
+                operation_summary=f"直井钻进，地层稳定，钻速良好。当前井深{current_depth}米。",
+                next_plan="保持参数，继续钻进"
+            )
+            session.add(r)
+        
+        # DG-088: 公共数据井 - 定向井，有井壁垮塌事故
+        for i in range(10):
+            report_date = base_date + timedelta(days=i)
+            is_npt_day = (i == 4)
+            
+            progress = 80 if not is_npt_day else 20
+            current_depth = 2200 + sum([80 if j != 4 else 20 for j in range(i + 1)])
+            
+            r = DailyReport(
+                well_id="DG-088",
+                report_date=report_date,
+                report_no=20 + i,
+                current_depth=current_depth,
+                progress=progress,
+                mud_density=1.30 if i < 5 else 1.35,
+                mud_viscosity=60.0,
+                mud_ph=9.4,
+                avg_rop=18.0 if not is_npt_day else 4.0,
+                bit_number=2,
+                operation_summary=f"定向井段钻进，{'井壁不稳定，发生垮塌' if is_npt_day else '控制井斜角度'}。当前井深{current_depth}米。",
+                next_plan="继续定向钻进" if not is_npt_day else "提高泥浆密度，稳定井壁"
+            )
+            
+            if is_npt_day:
+                npt = NPTEvent(
+                    category="Hole Instability",
+                    duration=14.5,
+                    severity="Medium",
+                    description="井深2520米处井壁垮塌，循环清洗14.5小时，提高泥浆密度至1.35。"
+                )
+                r.npt_events.append(npt)
+            
+            session.add(r)
+        
+        # DG-092: 公共数据井 - 已完井，完整钻井周期
+        for i in range(20):
+            report_date = base_date - timedelta(days=20-i)
+            
+            progress = 180 if i < 18 else 100
+            current_depth = 1800 + sum([180 if j < 18 else 100 for j in range(i + 1)])
+            
+            r = DailyReport(
+                well_id="DG-092",
+                report_date=report_date,
+                report_no=1 + i,
+                current_depth=current_depth,
+                progress=progress,
+                mud_density=1.24,
+                mud_viscosity=54.0,
+                mud_ph=9.7,
+                avg_rop=32.0 if i < 18 else 20.0,
+                bit_number=1 if i < 12 else 2,
+                operation_summary=f"{'完井作业' if i >= 18 else '正常钻进'}。当前井深{current_depth}米。",
+                next_plan="完井测试" if i >= 18 else "继续钻进"
+            )
+            session.add(r)
+        
+        # HB-156: 公共数据井 - 有多次小型NPT事件
+        for i in range(14):
+            report_date = base_date + timedelta(days=i)
+            is_npt_day = i in [3, 8, 11]
+            
+            progress = 140 if not is_npt_day else 90
+            current_depth = 2600 + sum([140 if j not in [3, 8, 11] else 90 for j in range(i + 1)])
+            
+            r = DailyReport(
+                well_id="HB-156",
+                report_date=report_date,
+                report_no=5 + i,
+                current_depth=current_depth,
+                progress=progress,
+                mud_density=1.28,
+                mud_viscosity=56.0,
+                mud_ph=9.5,
+                avg_rop=24.0 if not is_npt_day else 15.0,
+                bit_number=1 if i < 7 else 2,
+                operation_summary=f"水平井段钻进，{'设备维护' if is_npt_day else '作业正常'}。当前井深{current_depth}米。",
+                next_plan="继续钻进"
+            )
+            
+            if is_npt_day:
+                if i == 3:
+                    npt = NPTEvent(
+                        category="Equipment Maintenance",
+                        duration=6.0,
+                        severity="Low",
+                        description="钻井泵维护保养，更换缸套。"
+                    )
+                elif i == 8:
+                    npt = NPTEvent(
+                        category="Weather Delay",
+                        duration=8.5,
+                        severity="Low",
+                        description="大风天气，暂停作业等待。"
+                    )
+                else:  # i == 11
+                    npt = NPTEvent(
+                        category="Equipment Maintenance",
+                        duration=5.5,
+                        severity="Low",
+                        description="顶驱系统故障检修。"
+                    )
+                r.npt_events.append(npt)
+            
+            session.add(r)
+        
+        # 添加套管程序数据
+        casings = [
+            # ZT-102
+            CasingProgram(well_id="ZT-102", run_number=1, run_date=date(2023, 10, 3), 
+                         size=17.5, shoe_depth=800, cement_top=0),
+            CasingProgram(well_id="ZT-102", run_number=2, run_date=date(2023, 10, 15), 
+                         size=12.25, shoe_depth=2500, cement_top=1800),
+            
+            # ZT-201 (公共数据)
+            CasingProgram(well_id="ZT-201", run_number=1, run_date=date(2023, 11, 12), 
+                         size=17.5, shoe_depth=750, cement_top=0),
+            CasingProgram(well_id="ZT-201", run_number=2, run_date=date(2023, 11, 20), 
+                         size=12.25, shoe_depth=2300, cement_top=1700),
+            
+            # XY-015 (公共数据)
+            CasingProgram(well_id="XY-015", run_number=1, run_date=date(2023, 10, 22), 
+                         size=20.0, shoe_depth=900, cement_top=0),
+            CasingProgram(well_id="XY-015", run_number=2, run_date=date(2023, 11, 2), 
+                         size=13.375, shoe_depth=2800, cement_top=2000),
+            
+            # DG-088 (公共数据)
+            CasingProgram(well_id="DG-088", run_number=1, run_date=date(2023, 11, 3), 
+                         size=17.5, shoe_depth=700, cement_top=0),
+            CasingProgram(well_id="DG-088", run_number=2, run_date=date(2023, 11, 10), 
+                         size=12.25, shoe_depth=2000, cement_top=1500),
+            
+            # DG-092 (公共数据，已完井)
+            CasingProgram(well_id="DG-092", run_number=1, run_date=date(2023, 10, 16), 
+                         size=20.0, shoe_depth=850, cement_top=0),
+            CasingProgram(well_id="DG-092", run_number=2, run_date=date(2023, 10, 25), 
+                         size=13.375, shoe_depth=2500, cement_top=1800),
+            CasingProgram(well_id="DG-092", run_number=3, run_date=date(2023, 10, 31), 
+                         size=9.625, shoe_depth=4100, cement_top=3200),
+            
+            # HB-156 (公共数据)
+            CasingProgram(well_id="HB-156", run_number=1, run_date=date(2023, 9, 27), 
+                         size=17.5, shoe_depth=780, cement_top=0),
+            CasingProgram(well_id="HB-156", run_number=2, run_date=date(2023, 10, 8), 
+                         size=12.25, shoe_depth=2400, cement_top=1750),
+        ]
+        session.add_all(casings)
         
         session.commit()
         logger.info("✅ Mock data seeded successfully.")
@@ -631,12 +910,12 @@ async def handle_sse_post(request: Request):
                     },
                     {
                         "name": "get_daily_report",
-                        "description": "查询某井某天的钻井日报",
+                        "description": "获取指定日期的钻井日报。⚠️ 重要规则：只有当用户明确说出具体日期时才填写date参数（如'2023-11-10'、'昨天'），其他情况一律留空，系统会自动列出可用日期供用户选择。绝不要猜测或多次尝试！",
                         "inputSchema": {
                             "type": "object",
                             "properties": {
                                 "well_id": {"type": "string", "description": "井号"},
-                                "date": {"type": "string", "description": "日期(YYYY-MM-DD)，不填则查询最新"}
+                                "date": {"type": "string", "description": "日期(YYYY-MM-DD)。只有用户明确说出具体日期时才填写，否则留空。"}
                             },
                             "required": ["well_id"]
                         }
@@ -907,14 +1186,14 @@ async def handle_list_tools():
         ),
         Tool(
             name="get_daily_report",
-            description="获取指定日期的钻井日报，包括进尺、泥浆参数、NPT事件等",
+            description="获取指定日期的钻井日报。如用户未指定日期，工具会列出可用日期供选择，避免盲目查询",
             inputSchema={
                 "type": "object",
                 "properties": {
                     "well_id": {"type": "string", "description": "井号"},
-                    "date": {"type": "string", "description": "日期(YYYY-MM-DD)"}
+                    "date": {"type": "string", "description": "日期(YYYY-MM-DD)，如用户未明确指定则留空"}
                 },
-                "required": ["well_id", "date"]
+                "required": ["well_id"]
             }
         ),
         Tool(
@@ -1111,10 +1390,67 @@ def get_well_summary(well_id: str, user_role: str = "GUEST", user_id: str = "unk
     finally:
         session.close()
 
+# 添加查询缓存避免重复调用
+_daily_report_cache_http = {}
+_cache_ttl_http = 60  # 缓存有效期60秒
+
 @AuditLog.trace("get_daily_report")
-def get_daily_report(well_id: str, date_str: str, user_role: str = "GUEST", user_id: str = "unknown", user_email: str = "unknown") -> str:
+def get_daily_report(well_id: str, date_str: str = "", user_role: str = "GUEST", user_id: str = "unknown", user_email: str = "unknown") -> str:
     """获取日报"""
     well_id = normalize_well_id(well_id)
+    
+    # 扩大空值判断：包括空字符串、None、或者模糊表达（如"最新"、"今天"）
+    # 如果用户说的是模糊词汇，也应该先展示可用日期
+    ambiguous_keywords = ["最新", "latest", "recent", "当前", "current", "now"]
+    is_empty_or_ambiguous = (
+        not date_str or 
+        date_str.strip() == "" or
+        date_str.lower().strip() in ambiguous_keywords
+    )
+    
+    # 如果用户未提供明确日期，列出最近可用的日报供选择
+    if is_empty_or_ambiguous:
+        session = Session()
+        try:
+            # 查询该井最近的5条日报记录
+            recent_reports = session.query(DailyReport)\
+                .filter_by(well_id=well_id)\
+                .order_by(DailyReport.report_date.desc())\
+                .limit(5)\
+                .all()
+            
+            if not recent_reports:
+                return f"❌ 未找到井号 {well_id} 的任何日报记录。"
+            
+            # 生成日期列表
+            date_list = []
+            for report in recent_reports:
+                date_list.append(f"- {report.report_date} (井深: {report.current_depth}m, 进尺: {report.progress}m)")
+            
+            return f"""
+### ℹ️ 请明确查询日期
+
+您查询的是 **{well_id}** 的日报，但未指定具体日期。
+
+以下是该井最近的日报记录：
+
+{chr(10).join(date_list)}
+
+**请明确指定日期**，例如：
+- "查询 {well_id} 在 {recent_reports[0].report_date} 的日报"
+- "查询 {well_id} 昨天的日报"
+- "查询 {well_id} 最新的日报"（将查询 {recent_reports[0].report_date}）
+"""
+        finally:
+            session.close()
+    
+    # 检查缓存
+    cache_key = f"{well_id}_{date_str}_{user_role}"
+    if cache_key in _daily_report_cache_http:
+        cache_time, cached_result = _daily_report_cache_http[cache_key]
+        if (datetime.now() - cache_time).seconds < _cache_ttl_http:
+            logger.info(f"✅ [HTTP] 使用缓存数据: {cache_key}")
+            return cached_result
     
     session = Session()
     try:
@@ -1148,7 +1484,7 @@ def get_daily_report(well_id: str, date_str: str, user_role: str = "GUEST", user
                 npt_list.append(f"- {npt.category} ({npt.duration}小时，{npt.severity}): {npt.description}")
             npt_summary = "\n".join(npt_list)
         
-        return f"""
+        result = f"""
 ### 📋 钻井日报：{well_id} - {date_str} (报告编号：{report.report_no})
 
 #### 基本信息
@@ -1171,6 +1507,10 @@ def get_daily_report(well_id: str, date_str: str, user_role: str = "GUEST", user
 #### 非生产时间(NPT)
 {npt_summary}
 """
+        
+        # 保存到缓存
+        _daily_report_cache_http[cache_key] = (datetime.now(), result)
+        return result
     
     finally:
         session.close()
@@ -1388,14 +1728,14 @@ async def list_tools_http():
         },
         {
             "name": "get_daily_report",
-            "description": "获取钻井日报",
+            "description": "获取指定日期的钻井日报。⚠️ 重要：只有当用户明确说出具体日期时才填写date参数，其他情况一律留空，系统会列出可用日期。绝不要猜测或多次尝试！",
             "inputSchema": {
                 "type": "object",
                 "properties": {
                     "well_id": {"type": "string", "description": "井号"},
-                    "date": {"type": "string", "description": "日期(YYYY-MM-DD)"},
+                    "date": {"type": "string", "description": "日期(YYYY-MM-DD)。只有用户明确说出具体日期时才填写，否则留空"},
                 },
-                "required": ["well_id", "date"]
+                "required": ["well_id"]
             }
         },
         {
@@ -1529,12 +1869,13 @@ if __name__ == "__main__":
         print("\n🔓 权限模式：开发模式 (跳过权限检查)")
         print("   提示：生产环境请设置环境变量 DEV_MODE=false")
     else:
-        print("\n🔒 权限模式：生产模式 (严格权限控制)")
-        print("\n📌 权限角色：")
-        print("  • ADMIN    - 全部权限")
-        print("  • ENGINEER - Block-A的部分井")
-        print("  • VIEWER   - ZT-102只读")
-        print("  • GUEST    - 受限访问")
+        print("\n🔒 权限模式：生产模式 (基于角色的权限控制)")
+        print("\n📌 权限角色说明：")
+        print("  • ADMIN    - 管理员，可访问所有井")
+        print("  • ENGINEER - 工程师，可访问Block-A的部分井 + 公共数据")
+        print("  • VIEWER   - 查看者，可访问ZT-102 + 公共数据")
+        print("  • USER     - 普通用户，仅可访问公共数据")
+        print("  • GUEST    - 访客，仅可访问公共数据")
     
     print("\n📌 HTTP端点：")
     print("  GET  /         - 服务状态")
