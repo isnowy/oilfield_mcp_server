@@ -108,6 +108,32 @@ class PermissionService:
             return "*"
         return perms["wells"]
 
+def filter_wells_by_permission(wells: List[Any], user_role: str, user_id: str, user_email: str) -> List[Any]:
+    """
+    根据用户角色和ID过滤井数据（基于数据所有权）
+    
+    权限规则：
+    - ADMIN: 可以查看所有井
+    - 其他角色: 只能查看自己拥有的井 + 公共数据（owner_user_id为None）
+    """
+    if DEV_MODE:
+        logger.info(f"🔓 开发模式：用户 {user_email} 访问所有数据")
+        return wells
+    
+    if user_role and user_role.upper() == "ADMIN":
+        logger.info(f"✅ ADMIN用户 {user_email} 访问所有 {len(wells)} 口井")
+        return wells
+    
+    # 普通用户只能看到：
+    # 1. owner_user_id 是自己的
+    # 2. owner_user_id 为 None 的公共数据
+    filtered = [
+        well for well in wells
+        if well.owner_user_id == user_id or well.owner_user_id is None
+    ]
+    logger.info(f"🔒 用户 {user_email} ({user_role}) 访问 {len(filtered)}/{len(wells)} 口井")
+    return filtered
+
 class AuditLog:
     """装饰器：用于记录工具调用的输入、输出、耗时和状态"""
     
@@ -176,6 +202,10 @@ class Well(Base):
     well_type = Column(String(30))
     team = Column(String(50))
     rig = Column(String(50))
+    
+    # 数据权限字段
+    owner_user_id = Column(String(100), nullable=True)  # 数据所有者用户ID
+    owner_email = Column(String(200), nullable=True)     # 数据所有者邮箱
     
     reports = relationship("DailyReport", back_populates="well")
     casings = relationship("CasingProgram", back_populates="well")
@@ -254,16 +284,20 @@ def seed_mock_data():
         wells = [
             Well(id="ZT-102", name="中塔-102", block="Block-A", target_depth=4500, 
                  spud_date=date(2023, 10, 1), status="Active", well_type="Horizontal",
-                 team="Team-701", rig="Rig-50"),
+                 team="Team-701", rig="Rig-50",
+                 owner_user_id="697c0cbebb4a93216518c3f9", owner_email="user1@test.com"),
             Well(id="ZT-105", name="中塔-105", block="Block-A", target_depth=4200,
                  spud_date=date(2023, 10, 5), status="Active", well_type="Vertical",
-                 team="Team-702", rig="Rig-51"),
+                 team="Team-702", rig="Rig-51",
+                 owner_user_id="697c0cbebb4a93216518c3fd", owner_email="user2@test.com"),
             Well(id="ZT-108", name="中塔-108", block="Block-A", target_depth=5000,
                  spud_date=date(2023, 9, 20), status="Completed", well_type="Directional",
-                 team="Team-701", rig="Rig-50"),
+                 team="Team-701", rig="Rig-50",
+                 owner_user_id=None, owner_email=None),  # 公共数据
             Well(id="XY-009", name="新疆-009", block="Block-B", target_depth=5500,
                  spud_date=date(2023, 9, 15), status="Active", well_type="Horizontal",
-                 team="Team-808", rig="Rig-88"),
+                 team="Team-808", rig="Rig-88",
+                 owner_user_id="697c0cbebb4a93216518c3f9", owner_email="user1@test.com"),
         ]
         session.add_all(wells)
         
@@ -422,6 +456,39 @@ def parse_date_range(time_desc: str) -> tuple:
     return str(today), str(today)
 
 # ==========================================
+# 用户上下文管理
+# ==========================================
+
+class UserContext(BaseModel):
+    """用户上下文信息"""
+    role: str = "GUEST"
+    email: str = "unknown"
+    user_id: str = "unknown"
+
+# 使用contextvars来存储每个请求的用户上下文（线程安全）
+from contextvars import ContextVar
+current_user_context: ContextVar[UserContext] = ContextVar('current_user_context', default=UserContext())
+
+def extract_user_context(
+    x_user_role: Optional[str] = Header(None),
+    x_user_email: Optional[str] = Header(None),
+    x_user_id: Optional[str] = Header(None)
+) -> UserContext:
+    """从HTTP请求头中提取用户上下文"""
+    role = x_user_role or "GUEST"
+    email = x_user_email or "unknown"
+    user_id = x_user_id or "unknown"
+    
+    logger.info("=" * 60)
+    logger.info("📋 提取用户上下文")
+    logger.info(f"  角色: {role}")
+    logger.info(f"  邮箱: {email}")
+    logger.info(f"  用户ID: {user_id}")
+    logger.info("=" * 60)
+    
+    return UserContext(role=role, email=email, user_id=user_id)
+
+# ==========================================
 # MCP Server实例
 # ==========================================
 
@@ -486,7 +553,18 @@ async def handle_sse_head():
 async def handle_sse_post(request: Request):
     """SSE POST endpoint - 处理JSON-RPC消息（无状态模式）"""
     session_id = request.query_params.get("sessionId") or request.query_params.get("session_id")
+    
+    # 提取用户信息
+    user_role = request.headers.get("x-user-role", "GUEST")
+    user_email = request.headers.get("x-user-email", "unknown")
+    user_id = request.headers.get("x-user-id", "unknown")
+    
+    # 设置全局用户上下文
+    user_ctx = UserContext(role=user_role, email=user_email, user_id=user_id)
+    current_user_context.set(user_ctx)
+    
     logger.info(f"🌊 SSE POST请求 - session_id: {session_id}")
+    logger.info(f"👤 用户信息: {user_email} ({user_role}) [ID: {user_id}]")
     
     try:
         # 读取请求体
@@ -607,9 +685,7 @@ async def handle_sse_post(request: Request):
                 tool_args = params.get("arguments", {})
                 
                 logger.info(f"🔧 调用工具: {tool_name}, 参数: {tool_args}")
-                
-                # 获取用户角色（可以从headers或环境变量获取）
-                user_role = os.getenv("MCP_USER_ROLE", "ADMIN")
+                logger.info(f"👤 调用用户: {user_email} ({user_role})")
                 
                 # 调用对应的业务逻辑函数
                 try:
@@ -619,31 +695,41 @@ async def handle_sse_post(request: Request):
                         result_text = search_wells(
                             keyword=tool_args.get('keyword', ''),
                             status=tool_args.get('status', 'All'),
-                            user_role=user_role
+                            user_role=user_role,
+                            user_id=user_id,
+                            user_email=user_email
                         )
                     elif tool_name == "get_well_summary":
                         result_text = get_well_summary(
                             well_id=tool_args.get('well_id', ''),
-                            user_role=user_role
+                            user_role=user_role,
+                            user_id=user_id,
+                            user_email=user_email
                         )
                     elif tool_name == "get_daily_report":
                         result_text = get_daily_report(
                             well_id=tool_args.get('well_id', ''),
                             date_str=tool_args.get('date', ''),
-                            user_role=user_role
+                            user_role=user_role,
+                            user_id=user_id,
+                            user_email=user_email
                         )
                     elif tool_name == "compare_wells":
                         result_text = compare_wells(
                             well_ids=tool_args.get('well_ids', []),
                             metric=tool_args.get('metric', 'speed'),
-                            user_role=user_role
+                            user_role=user_role,
+                            user_id=user_id,
+                            user_email=user_email
                         )
                     elif tool_name == "generate_weekly_report":
                         result_text = generate_weekly_report(
                             well_id=tool_args.get('well_id', ''),
                             start_date=tool_args.get('start_date', ''),
                             end_date=tool_args.get('end_date', ''),
-                            user_role=user_role
+                            user_role=user_role,
+                            user_id=user_id,
+                            user_email=user_email
                         )
                     else:
                         raise ValueError(f"未知工具: {tool_name}")
@@ -864,9 +950,13 @@ async def handle_call_tool(name: str, arguments: dict):
     logger.info(f"🔧 MCP工具调用: {name}")
     logger.debug(f"📝 参数: {json.dumps(arguments, ensure_ascii=False)}")
     
-    # 默认用户角色（SSE连接时从环境变量或配置获取）
-    # 注意：实际生产环境需要从SSE连接的认证信息中获取
-    user_role = os.getenv("MCP_USER_ROLE", "ADMIN")  # 临时使用ADMIN权限
+    # 从ContextVar获取用户上下文
+    user_ctx = current_user_context.get()
+    user_role = user_ctx.role
+    user_id = user_ctx.user_id
+    user_email = user_ctx.email
+    
+    logger.info(f"👤 调用用户: {user_email} ({user_role})")
     
     try:
         result = None
@@ -875,31 +965,41 @@ async def handle_call_tool(name: str, arguments: dict):
             result = search_wells(
                 keyword=arguments.get('keyword', ''),
                 status=arguments.get('status', 'All'),
-                user_role=user_role
+                user_role=user_role,
+                user_id=user_id,
+                user_email=user_email
             )
         elif name == "get_well_summary":
             result = get_well_summary(
                 well_id=arguments.get('well_id', ''),
-                user_role=user_role
+                user_role=user_role,
+                user_id=user_id,
+                user_email=user_email
             )
         elif name == "get_daily_report":
             result = get_daily_report(
                 well_id=arguments.get('well_id', ''),
                 date_str=arguments.get('date', ''),
-                user_role=user_role
+                user_role=user_role,
+                user_id=user_id,
+                user_email=user_email
             )
         elif name == "compare_wells":
             result = compare_wells(
                 well_ids=arguments.get('well_ids', []),
                 metric=arguments.get('metric', 'speed'),
-                user_role=user_role
+                user_role=user_role,
+                user_id=user_id,
+                user_email=user_email
             )
         elif name == "generate_weekly_report":
             result = generate_weekly_report(
                 well_id=arguments.get('well_id', ''),
                 start_date=arguments.get('start_date', ''),
                 end_date=arguments.get('end_date', ''),
-                user_role=user_role
+                user_role=user_role,
+                user_id=user_id,
+                user_email=user_email
             )
         else:
             raise ValueError(f"未知工具: {name}")
@@ -916,7 +1016,7 @@ async def handle_call_tool(name: str, arguments: dict):
 # ==========================================
 
 @AuditLog.trace("search_wells")
-def search_wells(keyword: str, status: str = "All", user_role: str = "GUEST") -> str:
+def search_wells(keyword: str, status: str = "All", user_role: str = "GUEST", user_id: str = "unknown", user_email: str = "unknown") -> str:
     """搜索油井"""
     session = Session()
     try:
@@ -929,12 +1029,10 @@ def search_wells(keyword: str, status: str = "All", user_role: str = "GUEST") ->
         if status != "All":
             query = query.filter(Well.status == status)
         
-        wells = query.all()
+        all_wells = query.all()
         
-        # 权限过滤
-        accessible_wells = PermissionService.get_accessible_wells(user_role)
-        if accessible_wells != "*":
-            wells = [w for w in wells if w.id in accessible_wells]
+        # 使用新的权限过滤函数
+        wells = filter_wells_by_permission(all_wells, user_role, user_id, user_email)
         
         if not wells:
             return f"未找到匹配关键词 '{keyword}' 的井（状态：{status}）。"
@@ -946,7 +1044,8 @@ def search_wells(keyword: str, status: str = "All", user_role: str = "GUEST") ->
             "状态": w.status,
             "井型": w.well_type,
             "设计井深(m)": w.target_depth,
-            "钻井队": w.team
+            "钻井队": w.team,
+            "数据所有者": w.owner_email or "公共数据"
         } for w in wells]
         
         return f"### 🔍 搜索结果（共 {len(wells)} 口井）\n\n{df_to_markdown(pd.DataFrame(data))}"
@@ -955,12 +1054,9 @@ def search_wells(keyword: str, status: str = "All", user_role: str = "GUEST") ->
         session.close()
 
 @AuditLog.trace("get_well_summary")
-def get_well_summary(well_id: str, user_role: str = "GUEST") -> str:
+def get_well_summary(well_id: str, user_role: str = "GUEST", user_id: str = "unknown", user_email: str = "unknown") -> str:
     """获取单井概况"""
     well_id = normalize_well_id(well_id)
-    
-    if not PermissionService.check_well_access(user_role, well_id):
-        return f"🚫 权限拒绝：无权访问井号 {well_id}。"
     
     session = Session()
     try:
@@ -968,6 +1064,11 @@ def get_well_summary(well_id: str, user_role: str = "GUEST") -> str:
         
         if not well:
             return f"❌ 未找到井号: {well_id}"
+        
+        # 权限检查：使用filter函数
+        filtered = filter_wells_by_permission([well], user_role, user_id, user_email)
+        if not filtered:
+            return f"🚫 权限拒绝：无权访问井号 {well_id}。"
         
         reports = session.query(DailyReport).filter_by(well_id=well_id)\
             .order_by(DailyReport.report_date.desc()).limit(1).first()
@@ -1011,20 +1112,28 @@ def get_well_summary(well_id: str, user_role: str = "GUEST") -> str:
         session.close()
 
 @AuditLog.trace("get_daily_report")
-def get_daily_report(well_id: str, date_str: str, user_role: str = "GUEST") -> str:
+def get_daily_report(well_id: str, date_str: str, user_role: str = "GUEST", user_id: str = "unknown", user_email: str = "unknown") -> str:
     """获取日报"""
     well_id = normalize_well_id(well_id)
     
-    if not PermissionService.check_well_access(user_role, well_id):
-        return f"🚫 权限拒绝：无权访问井号 {well_id}。"
-    
-    try:
-        report_date = datetime.strptime(date_str, "%Y-%m-%d").date()
-    except ValueError:
-        return f"❌ 日期格式错误：{date_str}"
-    
     session = Session()
     try:
+        well = session.query(Well).filter_by(id=well_id).first()
+        if not well:
+            return f"❌ 未找到井号: {well_id}"
+        
+        # 权限检查
+        filtered = filter_wells_by_permission([well], user_role, user_id, user_email)
+        if not filtered:
+            return f"🚫 权限拒绝：无权访问井号 {well_id}。"
+        
+        # 解析日期
+        try:
+            report_date = datetime.strptime(date_str, "%Y-%m-%d").date()
+        except ValueError:
+            return f"❌ 日期格式错误：{date_str}"
+        
+        # 查询日报
         report = session.query(DailyReport)\
             .filter_by(well_id=well_id, report_date=report_date)\
             .first()
@@ -1067,17 +1176,26 @@ def get_daily_report(well_id: str, date_str: str, user_role: str = "GUEST") -> s
         session.close()
 
 @AuditLog.trace("compare_wells")
-def compare_wells(well_ids: List[str], metric: str = "speed", user_role: str = "GUEST") -> str:
+def compare_wells(well_ids: List[str], metric: str = "speed", user_role: str = "GUEST", user_id: str = "unknown", user_email: str = "unknown") -> str:
     """多井对比分析"""
     well_ids = [normalize_well_id(w) for w in well_ids]
     
-    # 权限检查
-    for wid in well_ids:
-        if not PermissionService.check_well_access(user_role, wid):
-            return f"🚫 权限拒绝：无权访问井号 {wid}。"
-    
     session = Session()
     try:
+        # 查询所有井
+        all_wells = session.query(Well).filter(Well.id.in_(well_ids)).all()
+        
+        # 权限过滤
+        wells = filter_wells_by_permission(all_wells, user_role, user_id, user_email)
+        
+        if not wells:
+            return f"🚫 权限拒绝：无权访问这些井。"
+        
+        # 检查是否有井被过滤掉
+        filtered_ids = [w.id for w in wells]
+        blocked_ids = [wid for wid in well_ids if wid not in filtered_ids]
+        if blocked_ids:
+            logger.warning(f"部分井被权限过滤: {blocked_ids}")
         results = []
         
         for well_id in well_ids:
@@ -1135,18 +1253,9 @@ def compare_wells(well_ids: List[str], metric: str = "speed", user_role: str = "
         session.close()
 
 @AuditLog.trace("generate_weekly_report")
-def generate_weekly_report(well_id: str, start_date: str, end_date: str, user_role: str = "GUEST") -> str:
+def generate_weekly_report(well_id: str, start_date: str, end_date: str, user_role: str = "GUEST", user_id: str = "unknown", user_email: str = "unknown") -> str:
     """生成周报"""
     well_id = normalize_well_id(well_id)
-    
-    if not PermissionService.check_well_access(user_role, well_id):
-        return f"🚫 权限拒绝：无权访问井号 {well_id}。"
-    
-    try:
-        start = datetime.strptime(start_date, "%Y-%m-%d").date()
-        end = datetime.strptime(end_date, "%Y-%m-%d").date()
-    except ValueError:
-        return "❌ 日期格式错误"
     
     session = Session()
     try:
@@ -1154,6 +1263,19 @@ def generate_weekly_report(well_id: str, start_date: str, end_date: str, user_ro
         if not well:
             return f"❌ 未找到井号: {well_id}"
         
+        # 权限检查
+        filtered = filter_wells_by_permission([well], user_role, user_id, user_email)
+        if not filtered:
+            return f"🚫 权限拒绝：无权访问井号 {well_id}。"
+        
+        # 解析日期
+        try:
+            start = datetime.strptime(start_date, "%Y-%m-%d").date()
+            end = datetime.strptime(end_date, "%Y-%m-%d").date()
+        except ValueError:
+            return "❌ 日期格式错误"
+        
+        # 查询报告
         reports = session.query(DailyReport)\
             .filter(DailyReport.well_id == well_id)\
             .filter(DailyReport.report_date >= start)\
@@ -1323,31 +1445,41 @@ async def call_tool(
             result = search_wells(
                 keyword=arguments.get('keyword', ''),
                 status=arguments.get('status', 'All'),
-                user_role=user_context.role
+                user_role=user_context.role,
+                user_id=user_context.user_id,
+                user_email=user_context.email
             )
         elif tool_name == "get_well_summary":
             result = get_well_summary(
                 well_id=arguments.get('well_id', ''),
-                user_role=user_context.role
+                user_role=user_context.role,
+                user_id=user_context.user_id,
+                user_email=user_context.email
             )
         elif tool_name == "get_daily_report":
             result = get_daily_report(
                 well_id=arguments.get('well_id', ''),
                 date_str=arguments.get('date', ''),
-                user_role=user_context.role
+                user_role=user_context.role,
+                user_id=user_context.user_id,
+                user_email=user_context.email
             )
         elif tool_name == "compare_wells":
             result = compare_wells(
                 well_ids=arguments.get('well_ids', []),
                 metric=arguments.get('metric', 'speed'),
-                user_role=user_context.role
+                user_role=user_context.role,
+                user_id=user_context.user_id,
+                user_email=user_context.email
             )
         elif tool_name == "generate_weekly_report":
             result = generate_weekly_report(
                 well_id=arguments.get('well_id', ''),
                 start_date=arguments.get('start_date', ''),
                 end_date=arguments.get('end_date', ''),
-                user_role=user_context.role
+                user_role=user_context.role,
+                user_id=user_context.user_id,
+                user_email=user_context.email
             )
         else:
             raise HTTPException(status_code=404, detail=f"工具不存在: {tool_name}")
