@@ -51,6 +51,10 @@ python oilfield_mcp_http_server.py
 # 或双击
 start_http_server.bat
 
+默认开发模式，如果测试权限需要开启生产模式
+$env:DEV_MODE="false"
+python oilfield_mcp_http_server.py
+
 # 3. 测试
 python test_http_server.py
 ```

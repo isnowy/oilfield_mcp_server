@@ -887,11 +887,12 @@ async def handle_sse_post(request: Request):
                 tools_list = [
                     {
                         "name": "search_wells",
-                        "description": "搜索油井信息，支持按关键字、区块或状态搜索",
+                        "description": "搜索油井信息，支持批量搜索多个关键词、区块或状态。💡重要：查询所有油井时，将keyword设为空字符串''或不传递keyword参数即可。",
                         "inputSchema": {
                             "type": "object",
                             "properties": {
-                                "keyword": {"type": "string", "description": "搜索关键字（井号、区块等）"},
+                                "keywords": {"type": "array", "items": {"type": "string"}, "description": "搜索关键词列表（井号、区块等）。留空返回所有油井"},
+                                "keyword": {"type": "string", "description": "单个搜索关键词（兼容旧接口）。空字符串''返回所有油井"},
                                 "status": {"type": "string", "enum": ["All", "Drilling", "Completed", "Suspended"], "default": "All"}
                             },
                             "required": []
@@ -899,25 +900,28 @@ async def handle_sse_post(request: Request):
                     },
                     {
                         "name": "get_well_summary",
-                        "description": "获取单井概况（位置、钻井参数、当前状态等）",
+                        "description": "获取单井或多井概况（位置、钻井参数、当前状态等），支持批量查询",
                         "inputSchema": {
                             "type": "object",
                             "properties": {
-                                "well_id": {"type": "string", "description": "井号"}
+                                "well_ids": {"type": "array", "items": {"type": "string"}, "description": "井号列表"},
+                                "well_id": {"type": "string", "description": "单个井号（兼容旧接口）"}
                             },
-                            "required": ["well_id"]
+                            "required": []
                         }
                     },
                     {
                         "name": "get_daily_report",
-                        "description": "获取指定日期的钻井日报。⚠️ 重要规则：只有当用户明确说出具体日期时才填写date参数（如'2023-11-10'、'昨天'），其他情况一律留空，系统会自动列出可用日期供用户选择。绝不要猜测或多次尝试！",
+                        "description": "获取指定日期的钻井日报，支持批量查询多个井的日报。⚠️ 重要规则：只有当用户明确说出具体日期时才填写date参数（如'2023-11-10'、'昨天'），其他情况一律留空，系统会自动列出可用日期供用户选择。绝不要猜测或多次尝试！",
                         "inputSchema": {
                             "type": "object",
                             "properties": {
-                                "well_id": {"type": "string", "description": "井号"},
-                                "date": {"type": "string", "description": "日期(YYYY-MM-DD)。只有用户明确说出具体日期时才填写，否则留空。"}
+                                "well_ids": {"type": "array", "items": {"type": "string"}, "description": "井号列表"},
+                                "well_id": {"type": "string", "description": "单个井号（兼容旧接口）"},
+                                "dates": {"type": "array", "items": {"type": "string"}, "description": "日期列表(YYYY-MM-DD)，与well_ids一一对应或所有井使用同一日期"},
+                                "date": {"type": "string", "description": "单个日期(YYYY-MM-DD)，只有用户明确说出具体日期时才填写，否则留空。"}
                             },
-                            "required": ["well_id"]
+                            "required": []
                         }
                     },
                     {
@@ -934,15 +938,16 @@ async def handle_sse_post(request: Request):
                     },
                     {
                         "name": "generate_weekly_report",
-                        "description": "生成指定时间段的周报或阶段报告",
+                        "description": "生成指定时间段的周报或阶段报告，支持批量生成多个井的周报",
                         "inputSchema": {
                             "type": "object",
                             "properties": {
-                                "well_id": {"type": "string", "description": "井号"},
+                                "well_ids": {"type": "array", "items": {"type": "string"}, "description": "井号列表"},
+                                "well_id": {"type": "string", "description": "单个井号（兼容旧接口）"},
                                 "start_date": {"type": "string", "description": "开始日期(YYYY-MM-DD)"},
                                 "end_date": {"type": "string", "description": "结束日期(YYYY-MM-DD)"}
                             },
-                            "required": ["well_id", "start_date", "end_date"]
+                            "required": ["start_date", "end_date"]
                         }
                     }
                 ]
@@ -972,6 +977,7 @@ async def handle_sse_post(request: Request):
                     
                     if tool_name == "search_wells":
                         result_text = search_wells(
+                            keywords=tool_args.get('keywords'),
                             keyword=tool_args.get('keyword', ''),
                             status=tool_args.get('status', 'All'),
                             user_role=user_role,
@@ -980,6 +986,7 @@ async def handle_sse_post(request: Request):
                         )
                     elif tool_name == "get_well_summary":
                         result_text = get_well_summary(
+                            well_ids=tool_args.get('well_ids'),
                             well_id=tool_args.get('well_id', ''),
                             user_role=user_role,
                             user_id=user_id,
@@ -987,7 +994,9 @@ async def handle_sse_post(request: Request):
                         )
                     elif tool_name == "get_daily_report":
                         result_text = get_daily_report(
+                            well_ids=tool_args.get('well_ids'),
                             well_id=tool_args.get('well_id', ''),
+                            dates=tool_args.get('dates'),
                             date_str=tool_args.get('date', ''),
                             user_role=user_role,
                             user_id=user_id,
@@ -1003,6 +1012,7 @@ async def handle_sse_post(request: Request):
                         )
                     elif tool_name == "generate_weekly_report":
                         result_text = generate_weekly_report(
+                            well_ids=tool_args.get('well_ids'),
                             well_id=tool_args.get('well_id', ''),
                             start_date=tool_args.get('start_date', ''),
                             end_date=tool_args.get('end_date', ''),
@@ -1163,37 +1173,41 @@ async def handle_list_tools():
     return [
         Tool(
             name="search_wells",
-            description="搜索油井（支持井号、井名、区块）",
+            description="搜索油井，支持批量搜索多个关键词（支持井号、井名、区块）。💡重要：如果要查询所有油井，将keyword设为空字符串''或不传递任何关键词参数即可返回所有油井列表。",
             inputSchema={
                 "type": "object",
                 "properties": {
-                    "keyword": {"type": "string", "description": "搜索关键词"},
-                    "status": {"type": "string", "enum": ["Active", "Completed", "Suspended", "All"], "default": "All"}
+                    "keywords": {"type": "array", "items": {"type": "string"}, "description": "搜索关键词列表。留空可返回所有油井"},
+                    "keyword": {"type": "string", "description": "单个搜索关键词（兼容旧接口）。设为空字符串''可返回所有油井"},
+                    "status": {"type": "string", "enum": ["Active", "Completed", "Suspended", "All"], "default": "All", "description": "油井状态筛选"}
                 },
-                "required": ["keyword"]
+                "required": []
             }
         ),
         Tool(
             name="get_well_summary",
-            description="获取单井概况，包括基本信息、当前状态和最新进展",
+            description="获取单井或多井概况，包括基本信息、当前状态和最新进展，支持批量查询",
             inputSchema={
                 "type": "object",
                 "properties": {
-                    "well_id": {"type": "string", "description": "井号，如ZT-102或中102"}
+                    "well_ids": {"type": "array", "items": {"type": "string"}, "description": "井号列表"},
+                    "well_id": {"type": "string", "description": "单个井号，如ZT-102或中102（兼容旧接口）"}
                 },
-                "required": ["well_id"]
+                "required": []
             }
         ),
         Tool(
             name="get_daily_report",
-            description="获取指定日期的钻井日报。如用户未指定日期，工具会列出可用日期供选择，避免盲目查询",
+            description="获取指定日期的钻井日报。支持批量查询多个井的日报。如用户未指定日期，工具会列出可用日期供选择，避免盲目查询",
             inputSchema={
                 "type": "object",
                 "properties": {
-                    "well_id": {"type": "string", "description": "井号"},
-                    "date": {"type": "string", "description": "日期(YYYY-MM-DD)，如用户未明确指定则留空"}
+                    "well_ids": {"type": "array", "items": {"type": "string"}, "description": "井号列表"},
+                    "well_id": {"type": "string", "description": "单个井号（兼容旧接口）"},
+                    "dates": {"type": "array", "items": {"type": "string"}, "description": "日期列表(YYYY-MM-DD)，与well_ids一一对应或所有井使用同一日期"},
+                    "date": {"type": "string", "description": "单个日期(YYYY-MM-DD)，如用户未明确指定则留空"}
                 },
-                "required": ["well_id"]
+                "required": []
             }
         ),
         Tool(
@@ -1210,15 +1224,16 @@ async def handle_list_tools():
         ),
         Tool(
             name="generate_weekly_report",
-            description="生成指定时间段的周报或阶段报告",
+            description="生成指定时间段的周报或阶段报告，支持批量生成多个井的周报",
             inputSchema={
                 "type": "object",
                 "properties": {
-                    "well_id": {"type": "string", "description": "井号"},
+                    "well_ids": {"type": "array", "items": {"type": "string"}, "description": "井号列表"},
+                    "well_id": {"type": "string", "description": "单个井号（兼容旧接口）"},
                     "start_date": {"type": "string", "description": "开始日期(YYYY-MM-DD)"},
                     "end_date": {"type": "string", "description": "结束日期(YYYY-MM-DD)"}
                 },
-                "required": ["well_id", "start_date", "end_date"]
+                "required": ["start_date", "end_date"]
             }
         )
     ]
@@ -1242,6 +1257,7 @@ async def handle_call_tool(name: str, arguments: dict):
         
         if name == "search_wells":
             result = search_wells(
+                keywords=arguments.get('keywords'),
                 keyword=arguments.get('keyword', ''),
                 status=arguments.get('status', 'All'),
                 user_role=user_role,
@@ -1250,6 +1266,7 @@ async def handle_call_tool(name: str, arguments: dict):
             )
         elif name == "get_well_summary":
             result = get_well_summary(
+                well_ids=arguments.get('well_ids'),
                 well_id=arguments.get('well_id', ''),
                 user_role=user_role,
                 user_id=user_id,
@@ -1257,7 +1274,9 @@ async def handle_call_tool(name: str, arguments: dict):
             )
         elif name == "get_daily_report":
             result = get_daily_report(
+                well_ids=arguments.get('well_ids'),
                 well_id=arguments.get('well_id', ''),
+                dates=arguments.get('dates'),
                 date_str=arguments.get('date', ''),
                 user_role=user_role,
                 user_id=user_id,
@@ -1273,6 +1292,7 @@ async def handle_call_tool(name: str, arguments: dict):
             )
         elif name == "generate_weekly_report":
             result = generate_weekly_report(
+                well_ids=arguments.get('well_ids'),
                 well_id=arguments.get('well_id', ''),
                 start_date=arguments.get('start_date', ''),
                 end_date=arguments.get('end_date', ''),
@@ -1295,26 +1315,72 @@ async def handle_call_tool(name: str, arguments: dict):
 # ==========================================
 
 @AuditLog.trace("search_wells")
-def search_wells(keyword: str, status: str = "All", user_role: str = "GUEST", user_id: str = "unknown", user_email: str = "unknown") -> str:
-    """搜索油井"""
+def search_wells(keywords: List[str] = None, keyword: str = None, status: str = "All", user_role: str = "GUEST", user_id: str = "unknown", user_email: str = "unknown") -> str:
+    """搜索油井 - 支持批量搜索"""
+    # 兼容旧接口：如果传入单个keyword，转换为列表
+    if keywords is None:
+        if keyword:
+            keywords = [keyword]
+        else:
+            # 如果没有提供任何关键词，返回所有油井
+            keywords = []
+    
     session = Session()
     try:
-        query = session.query(Well).filter(
-            (Well.name.contains(keyword)) | 
-            (Well.block.contains(keyword)) |
-            (Well.id.contains(keyword))
-        )
+        # 如果关键词列表为空或只包含空字符串，返回所有油井
+        if not keywords or (len(keywords) == 1 and not keywords[0]):
+            query = session.query(Well)
+            
+            if status != "All":
+                query = query.filter(Well.status == status)
+            
+            all_wells = query.all()
+            wells = filter_wells_by_permission(all_wells, user_role, user_id, user_email)
+            
+            if not wells:
+                return f"当前系统中没有油井数据（状态：{status}）。"
+            
+            data = [{
+                "井号": w.id,
+                "井名": w.name,
+                "区块": w.block,
+                "状态": w.status,
+                "井型": w.well_type,
+                "设计井深(m)": w.target_depth,
+                "钻井队": w.team,
+                "数据所有者": w.owner_email or "公共数据"
+            } for w in wells]
+            
+            return f"### 🔍 所有油井数据（共 {len(wells)} 口井）\n\n{df_to_markdown(pd.DataFrame(data))}"
         
-        if status != "All":
-            query = query.filter(Well.status == status)
+        # 有关键词的搜索逻辑
+        all_results = []
         
-        all_wells = query.all()
+        for kw in keywords:
+            if not kw:  # 跳过空关键词
+                continue
+                
+            query = session.query(Well).filter(
+                (Well.name.contains(kw)) | 
+                (Well.block.contains(kw)) |
+                (Well.id.contains(kw))
+            )
+            
+            if status != "All":
+                query = query.filter(Well.status == status)
+            
+            wells = query.all()
+            all_results.extend(wells)
+        
+        # 去重
+        unique_wells = {w.id: w for w in all_results}.values()
         
         # 使用新的权限过滤函数
-        wells = filter_wells_by_permission(all_wells, user_role, user_id, user_email)
+        wells = filter_wells_by_permission(list(unique_wells), user_role, user_id, user_email)
         
         if not wells:
-            return f"未找到匹配关键词 '{keyword}' 的井（状态：{status}）。"
+            keywords_str = "、".join([k for k in keywords if k])
+            return f"未找到匹配关键词 '{keywords_str}' 的井（状态：{status}）。"
         
         data = [{
             "井号": w.id,
@@ -1327,46 +1393,59 @@ def search_wells(keyword: str, status: str = "All", user_role: str = "GUEST", us
             "数据所有者": w.owner_email or "公共数据"
         } for w in wells]
         
-        return f"### 🔍 搜索结果（共 {len(wells)} 口井）\n\n{df_to_markdown(pd.DataFrame(data))}"
+        keywords_str = "、".join([k for k in keywords if k])
+        return f"### 🔍 搜索结果（关键词：{keywords_str}，共 {len(wells)} 口井）\n\n{df_to_markdown(pd.DataFrame(data))}"
     
     finally:
         session.close()
 
 @AuditLog.trace("get_well_summary")
-def get_well_summary(well_id: str, user_role: str = "GUEST", user_id: str = "unknown", user_email: str = "unknown") -> str:
-    """获取单井概况"""
-    well_id = normalize_well_id(well_id)
+def get_well_summary(well_ids: List[str] = None, well_id: str = None, user_role: str = "GUEST", user_id: str = "unknown", user_email: str = "unknown") -> str:
+    """获取单井或多井概况"""
+    # 兼容旧接口：如果传入单个well_id，转换为列表
+    if well_ids is None:
+        if well_id:
+            well_ids = [well_id]
+        else:
+            return "❌ 请提供井号"
+    
+    well_ids = [normalize_well_id(wid) for wid in well_ids]
     
     session = Session()
     try:
-        well = session.query(Well).filter_by(id=well_id).first()
+        results = []
         
-        if not well:
-            return f"❌ 未找到井号: {well_id}"
-        
-        # 权限检查：使用filter函数
-        filtered = filter_wells_by_permission([well], user_role, user_id, user_email)
-        if not filtered:
-            return f"🚫 权限拒绝：无权访问井号 {well_id}。"
-        
-        reports = session.query(DailyReport).filter_by(well_id=well_id)\
-            .order_by(DailyReport.report_date.desc()).limit(1).first()
-        
-        current_depth = reports.current_depth if reports else 0
-        latest_date = reports.report_date if reports else "无数据"
-        
-        casings = session.query(CasingProgram).filter_by(well_id=well_id)\
-            .order_by(CasingProgram.run_number).all()
-        casing_info = "\n".join([
-            f"- 第{c.run_number}次: {c.size}英寸，鞋深{c.shoe_depth}米"
-            for c in casings
-        ]) if casings else "暂无套管数据"
-        
-        npt_count = session.query(NPTEvent)\
-            .join(DailyReport)\
-            .filter(DailyReport.well_id == well_id).count()
-        
-        return f"""
+        for wid in well_ids:
+            well = session.query(Well).filter_by(id=wid).first()
+            
+            if not well:
+                results.append(f"❌ 未找到井号: {wid}")
+                continue
+            
+            # 权限检查：使用filter函数
+            filtered = filter_wells_by_permission([well], user_role, user_id, user_email)
+            if not filtered:
+                results.append(f"🚫 权限拒绝：无权访问井号 {wid}。")
+                continue
+            
+            reports = session.query(DailyReport).filter_by(well_id=wid)\
+                .order_by(DailyReport.report_date.desc()).limit(1).first()
+            
+            current_depth = reports.current_depth if reports else 0
+            latest_date = reports.report_date if reports else "无数据"
+            
+            casings = session.query(CasingProgram).filter_by(well_id=wid)\
+                .order_by(CasingProgram.run_number).all()
+            casing_info = "\n".join([
+                f"- 第{c.run_number}次: {c.size}英寸，鞋深{c.shoe_depth}米"
+                for c in casings
+            ]) if casings else "暂无套管数据"
+            
+            npt_count = session.query(NPTEvent)\
+                .join(DailyReport)\
+                .filter(DailyReport.well_id == wid).count()
+            
+            well_summary = f"""
 ### 🏭 井信息概览：{well.name} ({well.id})
 
 #### 基本信息
@@ -1386,6 +1465,12 @@ def get_well_summary(well_id: str, user_role: str = "GUEST", user_id: str = "unk
 #### 套管程序
 {casing_info}
 """
+            results.append(well_summary)
+        
+        if len(results) == 1:
+            return results[0]
+        else:
+            return "\n\n---\n\n".join(results)
     
     finally:
         session.close()
@@ -1395,97 +1480,121 @@ _daily_report_cache_http = {}
 _cache_ttl_http = 60  # 缓存有效期60秒
 
 @AuditLog.trace("get_daily_report")
-def get_daily_report(well_id: str, date_str: str = "", user_role: str = "GUEST", user_id: str = "unknown", user_email: str = "unknown") -> str:
-    """获取日报"""
-    well_id = normalize_well_id(well_id)
+def get_daily_report(well_ids: List[str] = None, well_id: str = None, dates: List[str] = None, date_str: str = "", user_role: str = "GUEST", user_id: str = "unknown", user_email: str = "unknown") -> str:
+    """获取日报 - 支持批量查询"""
+    # 兼容旧接口
+    if well_ids is None:
+        if well_id:
+            well_ids = [well_id]
+        else:
+            return "❌ 请提供井号"
     
-    # 扩大空值判断：包括空字符串、None、或者模糊表达（如"最新"、"今天"）
-    # 如果用户说的是模糊词汇，也应该先展示可用日期
+    if dates is None:
+        if date_str:
+            dates = [date_str]
+        else:
+            dates = [""]
+    
+    well_ids = [normalize_well_id(wid) for wid in well_ids]
+    
+    # 如果只有一个井且日期为空，显示可用日期
     ambiguous_keywords = ["最新", "latest", "recent", "当前", "current", "now"]
-    is_empty_or_ambiguous = (
-        not date_str or 
-        date_str.strip() == "" or
-        date_str.lower().strip() in ambiguous_keywords
-    )
-    
-    # 如果用户未提供明确日期，列出最近可用的日报供选择
-    if is_empty_or_ambiguous:
-        session = Session()
-        try:
-            # 查询该井最近的5条日报记录
-            recent_reports = session.query(DailyReport)\
-                .filter_by(well_id=well_id)\
-                .order_by(DailyReport.report_date.desc())\
-                .limit(5)\
-                .all()
-            
-            if not recent_reports:
-                return f"❌ 未找到井号 {well_id} 的任何日报记录。"
-            
-            # 生成日期列表
-            date_list = []
-            for report in recent_reports:
-                date_list.append(f"- {report.report_date} (井深: {report.current_depth}m, 进尺: {report.progress}m)")
-            
-            return f"""
+    if len(well_ids) == 1 and len(dates) == 1:
+        is_empty_or_ambiguous = (
+            not dates[0] or 
+            dates[0].strip() == "" or
+            dates[0].lower().strip() in ambiguous_keywords
+        )
+        
+        if is_empty_or_ambiguous:
+            session = Session()
+            try:
+                recent_reports = session.query(DailyReport)\
+                    .filter_by(well_id=well_ids[0])\
+                    .order_by(DailyReport.report_date.desc())\
+                    .limit(5)\
+                    .all()
+                
+                if not recent_reports:
+                    return f"❌ 未找到井号 {well_ids[0]} 的任何日报记录。"
+                
+                date_list = []
+                for report in recent_reports:
+                    date_list.append(f"- {report.report_date} (井深: {report.current_depth}m, 进尺: {report.progress}m)")
+                
+                return f"""
 ### ℹ️ 请明确查询日期
 
-您查询的是 **{well_id}** 的日报，但未指定具体日期。
+您查询的是 **{well_ids[0]}** 的日报，但未指定具体日期。
 
 以下是该井最近的日报记录：
 
 {chr(10).join(date_list)}
 
 **请明确指定日期**，例如：
-- "查询 {well_id} 在 {recent_reports[0].report_date} 的日报"
-- "查询 {well_id} 昨天的日报"
-- "查询 {well_id} 最新的日报"（将查询 {recent_reports[0].report_date}）
+- "查询 {well_ids[0]} 在 {recent_reports[0].report_date} 的日报"
+- "查询 {well_ids[0]} 昨天的日报"
 """
-        finally:
-            session.close()
+            finally:
+                session.close()
     
-    # 检查缓存
-    cache_key = f"{well_id}_{date_str}_{user_role}"
-    if cache_key in _daily_report_cache_http:
-        cache_time, cached_result = _daily_report_cache_http[cache_key]
-        if (datetime.now() - cache_time).seconds < _cache_ttl_http:
-            logger.info(f"✅ [HTTP] 使用缓存数据: {cache_key}")
-            return cached_result
-    
+    # 批量查询
     session = Session()
     try:
-        well = session.query(Well).filter_by(id=well_id).first()
-        if not well:
-            return f"❌ 未找到井号: {well_id}"
+        results = []
         
-        # 权限检查
-        filtered = filter_wells_by_permission([well], user_role, user_id, user_email)
-        if not filtered:
-            return f"🚫 权限拒绝：无权访问井号 {well_id}。"
+        # 如果dates只有一个元素，所有井使用同一个日期
+        if len(dates) == 1:
+            dates = dates * len(well_ids)
+        elif len(dates) != len(well_ids):
+            return "❌ 井号和日期数量不匹配"
         
-        # 解析日期
-        try:
-            report_date = datetime.strptime(date_str, "%Y-%m-%d").date()
-        except ValueError:
-            return f"❌ 日期格式错误：{date_str}"
-        
-        # 查询日报
-        report = session.query(DailyReport)\
-            .filter_by(well_id=well_id, report_date=report_date)\
-            .first()
-        
-        if not report:
-            return f"未找到 {well_id} 在 {date_str} 的日报。"
-        
-        npt_summary = "无"
-        if report.npt_events:
-            npt_list = []
-            for npt in report.npt_events:
-                npt_list.append(f"- {npt.category} ({npt.duration}小时，{npt.severity}): {npt.description}")
-            npt_summary = "\n".join(npt_list)
-        
-        result = f"""
-### 📋 钻井日报：{well_id} - {date_str} (报告编号：{report.report_no})
+        for wid, dt in zip(well_ids, dates):
+            # 检查缓存
+            cache_key = f"{wid}_{dt}_{user_role}"
+            if cache_key in _daily_report_cache_http:
+                cache_time, cached_result = _daily_report_cache_http[cache_key]
+                if (datetime.now() - cache_time).seconds < _cache_ttl_http:
+                    logger.info(f"✅ [HTTP] 使用缓存数据: {cache_key}")
+                    results.append(cached_result)
+                    continue
+            
+            well = session.query(Well).filter_by(id=wid).first()
+            if not well:
+                results.append(f"❌ 未找到井号: {wid}")
+                continue
+            
+            # 权限检查
+            filtered = filter_wells_by_permission([well], user_role, user_id, user_email)
+            if not filtered:
+                results.append(f"🚫 权限拒绝：无权访问井号 {wid}。")
+                continue
+            
+            # 解析日期
+            try:
+                report_date = datetime.strptime(dt, "%Y-%m-%d").date()
+            except ValueError:
+                results.append(f"❌ 日期格式错误：{dt}")
+                continue
+            
+            # 查询日报
+            report = session.query(DailyReport)\
+                .filter_by(well_id=wid, report_date=report_date)\
+                .first()
+            
+            if not report:
+                results.append(f"未找到 {wid} 在 {dt} 的日报。")
+                continue
+            
+            npt_summary = "无"
+            if report.npt_events:
+                npt_list = []
+                for npt in report.npt_events:
+                    npt_list.append(f"- {npt.category} ({npt.duration}小时，{npt.severity}): {npt.description}")
+                npt_summary = "\n".join(npt_list)
+            
+            result = f"""
+### 📋 钻井日报：{wid} - {dt} (报告编号：{report.report_no})
 
 #### 基本信息
 - **当前井深**: {report.current_depth} m
@@ -1507,10 +1616,15 @@ def get_daily_report(well_id: str, date_str: str = "", user_role: str = "GUEST",
 #### 非生产时间(NPT)
 {npt_summary}
 """
+            
+            # 保存到缓存
+            _daily_report_cache_http[cache_key] = (datetime.now(), result)
+            results.append(result)
         
-        # 保存到缓存
-        _daily_report_cache_http[cache_key] = (datetime.now(), result)
-        return result
+        if len(results) == 1:
+            return results[0]
+        else:
+            return "\n\n---\n\n".join(results)
     
     finally:
         session.close()
@@ -1593,21 +1707,22 @@ def compare_wells(well_ids: List[str], metric: str = "speed", user_role: str = "
         session.close()
 
 @AuditLog.trace("generate_weekly_report")
-def generate_weekly_report(well_id: str, start_date: str, end_date: str, user_role: str = "GUEST", user_id: str = "unknown", user_email: str = "unknown") -> str:
-    """生成周报"""
-    well_id = normalize_well_id(well_id)
+def generate_weekly_report(well_ids: List[str] = None, well_id: str = None, start_date: str = None, end_date: str = None, user_role: str = "GUEST", user_id: str = "unknown", user_email: str = "unknown") -> str:
+    """生成周报 - 支持批量查询"""
+    # 兼容旧接口
+    if well_ids is None:
+        if well_id:
+            well_ids = [well_id]
+        else:
+            return "❌ 请提供井号"
+    
+    if not start_date or not end_date:
+        return "❌ 请提供开始和结束日期"
+    
+    well_ids = [normalize_well_id(wid) for wid in well_ids]
     
     session = Session()
     try:
-        well = session.query(Well).filter_by(id=well_id).first()
-        if not well:
-            return f"❌ 未找到井号: {well_id}"
-        
-        # 权限检查
-        filtered = filter_wells_by_permission([well], user_role, user_id, user_email)
-        if not filtered:
-            return f"🚫 权限拒绝：无权访问井号 {well_id}。"
-        
         # 解析日期
         try:
             start = datetime.strptime(start_date, "%Y-%m-%d").date()
@@ -1615,35 +1730,50 @@ def generate_weekly_report(well_id: str, start_date: str, end_date: str, user_ro
         except ValueError:
             return "❌ 日期格式错误"
         
-        # 查询报告
-        reports = session.query(DailyReport)\
-            .filter(DailyReport.well_id == well_id)\
-            .filter(DailyReport.report_date >= start)\
-            .filter(DailyReport.report_date <= end)\
-            .all()
+        results = []
         
-        if not reports:
-            return f"时间段 {start_date} 至 {end_date} 无数据"
-        
-        total_progress = sum([r.progress for r in reports])
-        avg_rop = sum([r.avg_rop for r in reports]) / len(reports)
-        start_depth = reports[0].current_depth - reports[0].progress
-        end_depth = reports[-1].current_depth
-        
-        npt_events = []
-        for r in reports:
-            if r.npt_events:
-                for npt in r.npt_events:
-                    npt_events.append({
-                        "日期": r.report_date,
-                        "类别": npt.category,
-                        "损失时间(h)": npt.duration
-                    })
-        
-        npt_section = "无" if not npt_events else df_to_markdown(pd.DataFrame(npt_events))
-        
-        return f"""
-### 📊 周报：{well.name} ({well_id})
+        for wid in well_ids:
+            well = session.query(Well).filter_by(id=wid).first()
+            if not well:
+                results.append(f"❌ 未找到井号: {wid}")
+                continue
+            
+            # 权限检查
+            filtered = filter_wells_by_permission([well], user_role, user_id, user_email)
+            if not filtered:
+                results.append(f"🚫 权限拒绝：无权访问井号 {wid}。")
+                continue
+            
+            # 查询报告
+            reports = session.query(DailyReport)\
+                .filter(DailyReport.well_id == wid)\
+                .filter(DailyReport.report_date >= start)\
+                .filter(DailyReport.report_date <= end)\
+                .all()
+            
+            if not reports:
+                results.append(f"时间段 {start_date} 至 {end_date} 井号 {wid} 无数据")
+                continue
+            
+            total_progress = sum([r.progress for r in reports])
+            avg_rop = sum([r.avg_rop for r in reports]) / len(reports)
+            start_depth = reports[0].current_depth - reports[0].progress
+            end_depth = reports[-1].current_depth
+            
+            npt_events = []
+            for r in reports:
+                if r.npt_events:
+                    for npt in r.npt_events:
+                        npt_events.append({
+                            "日期": r.report_date,
+                            "类别": npt.category,
+                            "损失时间(h)": npt.duration
+                        })
+            
+            npt_section = "无" if not npt_events else df_to_markdown(pd.DataFrame(npt_events))
+            
+            report_text = f"""
+### 📊 周报：{well.name} ({wid})
 **时间段**: {start_date} ~ {end_date}
 
 #### 进度汇总
@@ -1661,6 +1791,12 @@ def generate_weekly_report(well_id: str, start_date: str, end_date: str, user_ro
 - 钻井效率: {'优秀' if avg_rop > 25 else '良好' if avg_rop > 20 else '一般'}
 - 安全性: {'优秀' if len(npt_events) == 0 else '需改进'}
 """
+            results.append(report_text)
+        
+        if len(results) == 1:
+            return results[0]
+        else:
+            return "\n\n---\n\n".join(results)
     
     finally:
         session.close()
@@ -1705,37 +1841,41 @@ async def list_tools_http():
     tools = [
         {
             "name": "search_wells",
-            "description": "搜索油井（支持井号、井名、区块）",
+            "description": "搜索油井，支持批量搜索多个关键词（支持井号、井名、区块）。💡重要：查询所有油井时，将keyword设为空字符串''或不传递keyword参数即可返回所有油井。",
             "inputSchema": {
                 "type": "object",
                 "properties": {
-                    "keyword": {"type": "string", "description": "搜索关键词"},
+                    "keywords": {"type": "array", "items": {"type": "string"}, "description": "搜索关键词列表。留空返回所有油井"},
+                    "keyword": {"type": "string", "description": "单个搜索关键词（兼容旧接口）。空字符串''返回所有油井"},
                     "status": {"type": "string", "enum": ["Active", "Completed", "Suspended", "All"], "default": "All"},
                 },
-                "required": ["keyword"]
+                "required": []
             }
         },
         {
             "name": "get_well_summary",
-            "description": "获取单井概况",
+            "description": "获取单井或多井概况，支持批量查询",
             "inputSchema": {
                 "type": "object",
                 "properties": {
-                    "well_id": {"type": "string", "description": "井号，如ZT-102或中102"},
+                    "well_ids": {"type": "array", "items": {"type": "string"}, "description": "井号列表"},
+                    "well_id": {"type": "string", "description": "单个井号，如ZT-102或中102（兼容旧接口）"},
                 },
-                "required": ["well_id"]
+                "required": []
             }
         },
         {
             "name": "get_daily_report",
-            "description": "获取指定日期的钻井日报。⚠️ 重要：只有当用户明确说出具体日期时才填写date参数，其他情况一律留空，系统会列出可用日期。绝不要猜测或多次尝试！",
+            "description": "获取指定日期的钻井日报，支持批量查询多个井的日报。⚠️ 重要：只有当用户明确说出具体日期时才填写date参数，其他情况一律留空，系统会列出可用日期。绝不要猜测或多次尝试！",
             "inputSchema": {
                 "type": "object",
                 "properties": {
-                    "well_id": {"type": "string", "description": "井号"},
-                    "date": {"type": "string", "description": "日期(YYYY-MM-DD)。只有用户明确说出具体日期时才填写，否则留空"},
+                    "well_ids": {"type": "array", "items": {"type": "string"}, "description": "井号列表"},
+                    "well_id": {"type": "string", "description": "单个井号（兼容旧接口）"},
+                    "dates": {"type": "array", "items": {"type": "string"}, "description": "日期列表(YYYY-MM-DD)，与well_ids一一对应或所有井使用同一日期"},
+                    "date": {"type": "string", "description": "单个日期(YYYY-MM-DD)。只有用户明确说出具体日期时才填写，否则留空"},
                 },
-                "required": ["well_id"]
+                "required": []
             }
         },
         {
@@ -1752,15 +1892,16 @@ async def list_tools_http():
         },
         {
             "name": "generate_weekly_report",
-            "description": "生成周报",
+            "description": "生成周报，支持批量生成多个井的周报",
             "inputSchema": {
                 "type": "object",
                 "properties": {
-                    "well_id": {"type": "string", "description": "井号"},
+                    "well_ids": {"type": "array", "items": {"type": "string"}, "description": "井号列表"},
+                    "well_id": {"type": "string", "description": "单个井号（兼容旧接口）"},
                     "start_date": {"type": "string", "description": "开始日期(YYYY-MM-DD)"},
                     "end_date": {"type": "string", "description": "结束日期(YYYY-MM-DD)"},
                 },
-                "required": ["well_id", "start_date", "end_date"]
+                "required": ["start_date", "end_date"]
             }
         },
     ]
@@ -1783,6 +1924,7 @@ async def call_tool(
         # 执行工具
         if tool_name == "search_wells":
             result = search_wells(
+                keywords=arguments.get('keywords'),
                 keyword=arguments.get('keyword', ''),
                 status=arguments.get('status', 'All'),
                 user_role=user_context.role,
@@ -1791,6 +1933,7 @@ async def call_tool(
             )
         elif tool_name == "get_well_summary":
             result = get_well_summary(
+                well_ids=arguments.get('well_ids'),
                 well_id=arguments.get('well_id', ''),
                 user_role=user_context.role,
                 user_id=user_context.user_id,
@@ -1798,7 +1941,9 @@ async def call_tool(
             )
         elif tool_name == "get_daily_report":
             result = get_daily_report(
+                well_ids=arguments.get('well_ids'),
                 well_id=arguments.get('well_id', ''),
+                dates=arguments.get('dates'),
                 date_str=arguments.get('date', ''),
                 user_role=user_context.role,
                 user_id=user_context.user_id,
@@ -1814,6 +1959,7 @@ async def call_tool(
             )
         elif tool_name == "generate_weekly_report":
             result = generate_weekly_report(
+                well_ids=arguments.get('well_ids'),
                 well_id=arguments.get('well_id', ''),
                 start_date=arguments.get('start_date', ''),
                 end_date=arguments.get('end_date', ''),
