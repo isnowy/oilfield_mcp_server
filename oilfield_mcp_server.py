@@ -1398,8 +1398,7 @@ def compare_npt_statistics(
         # 事故次数统计
         count_df = df.groupby("well_id").size().reset_index(name="事故次数")
         
-        return f"""
-### ⚠️ NPT对比分析矩阵
+        return f"""### ⚠️ NPT对比分析矩阵
 
 #### 按事故类别统计（单位：小时）
 {pivot.to_markdown()}
@@ -1410,6 +1409,9 @@ def compare_npt_statistics(
 **风险提示**：
 - NPT最高的井需要重点关注
 - 建议分析事故原因并制定预防措施
+
+---
+💡 **可视化建议**：此数据适合用 **柱状图** 展示，可以直观对比各井的NPT总时长和事故频次。
 """
     
     finally:

@@ -34,8 +34,10 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 import uvicorn
 
-from sqlalchemy import create_engine, Column, Integer, String, Float, Date, ForeignKey, Text, DateTime
+from sqlalchemy import create_engine, Column, Integer, String, Float, Date, ForeignKey, Text, DateTime, Boolean, Numeric
 from sqlalchemy.orm import declarative_base, sessionmaker, relationship
+import psycopg2
+from psycopg2.extras import RealDictCursor
 
 # ==========================================
 # 日志配置
@@ -49,6 +51,18 @@ logger = logging.getLogger("OilfieldMCP_HTTP")
 
 # 开发模式配置：设置 DEV_MODE=true 可跳过权限检查（方便测试）
 DEV_MODE = os.getenv("DEV_MODE", "true").lower() in ["true", "1", "yes"]
+
+# 数据源配置：设置 USE_REAL_DB=true 使用真实PostgreSQL数据库，false使用模拟数据（内存数据库）
+USE_REAL_DB = os.getenv("USE_REAL_DB", "false").lower() in ["true", "1", "yes"]
+
+# PostgreSQL数据库配置（仅在USE_REAL_DB=true时使用）
+DB_CONFIG = {
+    'host': os.getenv('DB_HOST', 'localhost'),
+    'port': int(os.getenv('DB_PORT', '5432')),
+    'database': os.getenv('DB_NAME', 'rag'),
+    'user': os.getenv('DB_USER', 'postgres'),
+    'password': os.getenv('DB_PASSWORD', 'postgres')
+}
 
 # 权限配置 - 可以从配置文件或环境变量加载
 USER_PERMISSIONS = {
@@ -304,13 +318,51 @@ class CasingProgram(Base):
     
     well = relationship("Well", back_populates="casings")
 
-# 数据库初始化
-engine = create_engine('sqlite:///:memory:', echo=False)
-Session = sessionmaker(bind=engine)
-Base.metadata.create_all(engine)
+# 数据库初始化（仅在使用模拟数据时）
+if not USE_REAL_DB:
+    engine = create_engine('sqlite:///:memory:', echo=False)
+    Session = sessionmaker(bind=engine)
+    Base.metadata.create_all(engine)
+else:
+    engine = None
+    Session = None
+
+# PostgreSQL数据库连接函数（仅在USE_REAL_DB=true时使用）
+def get_db_connection():
+    """获取PostgreSQL数据库连接"""
+    if not USE_REAL_DB:
+        raise RuntimeError("未启用真实数据库模式")
+    try:
+        conn = psycopg2.connect(**DB_CONFIG, cursor_factory=RealDictCursor)
+        return conn
+    except Exception as e:
+        logger.error(f"数据库连接失败: {e}")
+        raise
+
+def test_db_connection():
+    """测试数据库连接"""
+    if not USE_REAL_DB:
+        return True
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        cursor.execute("SELECT COUNT(*) as count FROM oil_wells")
+        result = cursor.fetchone()
+        count = result['count']
+        cursor.close()
+        conn.close()
+        logger.info(f"✅ 数据库连接成功，共有 {count} 口井")
+        return True
+    except Exception as e:
+        logger.error(f"❌ 数据库连接测试失败: {e}")
+        return False
 
 def seed_mock_data():
-    """注入模拟数据"""
+    """注入模拟数据（仅在USE_REAL_DB=false时调用）"""
+    if USE_REAL_DB:
+        logger.info("✅ 使用真实数据库，跳过模拟数据初始化")
+        return
+    
     session = Session()
     
     try:
@@ -645,7 +697,11 @@ def seed_mock_data():
     finally:
         session.close()
 
-seed_mock_data()
+# 初始化数据
+if not USE_REAL_DB:
+    seed_mock_data()
+else:
+    logger.info("🗄️  使用真实PostgreSQL数据库")
 
 # ==========================================
 # 辅助工具函数
@@ -784,9 +840,19 @@ async def lifespan(app: FastAPI):
     logger.info("🚀 油田钻井数据MCP Server (HTTP/SSE) 启动中...")
     logger.info(f"📍 监听地址: http://0.0.0.0:8080")
     logger.info(f"🔒 权限模式: {'开发模式(跳过权限)' if DEV_MODE else '生产模式(严格权限)'}")
-    # 初始化模拟数据
-    seed_mock_data()
-    logger.info("✅ 模拟数据已加载")
+    logger.info(f"🗄️  数据源: {'PostgreSQL真实数据库' if USE_REAL_DB else 'SQLite模拟数据'}")
+    
+    # 初始化数据
+    if USE_REAL_DB:
+        logger.info(f"📊 数据库配置: {DB_CONFIG['host']}:{DB_CONFIG['port']}/{DB_CONFIG['database']}")
+        if test_db_connection():
+            logger.info("✅ 真实数据库连接正常")
+        else:
+            logger.warning("⚠️  真实数据库连接失败，请检查配置")
+    else:
+        seed_mock_data()
+        logger.info("✅ 模拟数据已加载")
+    
     yield
     logger.info("👋 MCP Server 关闭")
 
@@ -1316,7 +1382,7 @@ async def handle_call_tool(name: str, arguments: dict):
 
 @AuditLog.trace("search_wells")
 def search_wells(keywords: List[str] = None, keyword: str = None, status: str = "All", user_role: str = "GUEST", user_id: str = "unknown", user_email: str = "unknown") -> str:
-    """搜索油井 - 支持批量搜索"""
+    """搜索油井 - 支持批量搜索（自动切换数据源）"""
     # 兼容旧接口：如果传入单个keyword，转换为列表
     if keywords is None:
         if keyword:
@@ -1325,6 +1391,14 @@ def search_wells(keywords: List[str] = None, keyword: str = None, status: str = 
             # 如果没有提供任何关键词，返回所有油井
             keywords = []
     
+    # 根据USE_REAL_DB选择数据源
+    if USE_REAL_DB:
+        return _search_wells_real_db(keywords, user_role, user_id, user_email)
+    else:
+        return _search_wells_mock_db(keywords, status, user_role, user_id, user_email)
+
+def _search_wells_mock_db(keywords: List[str], status: str, user_role: str, user_id: str, user_email: str) -> str:
+    """搜索油井 - 模拟数据库"""
     session = Session()
     try:
         # 如果关键词列表为空或只包含空字符串，返回所有油井
@@ -1398,6 +1472,90 @@ def search_wells(keywords: List[str] = None, keyword: str = None, status: str = 
     
     finally:
         session.close()
+
+def _search_wells_real_db(keywords: List[str], user_role: str, user_id: str, user_email: str) -> str:
+    """搜索油井 - 真实数据库"""
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    
+    try:
+        limit = 100
+        
+        # 如果没有关键词，返回所有油井
+        if not keywords or (len(keywords) == 1 and not keywords[0]):
+            query = f"""
+                SELECT well_name, qk, jx, sjjs, sjrq, ktxm
+                FROM oil_wells 
+                WHERE is_deleted = false
+                ORDER BY created_at DESC
+                LIMIT %s
+            """
+            cursor.execute(query, (limit,))
+        else:
+            # 有关键词的搜索
+            conditions = []
+            params = []
+            
+            for kw in keywords:
+                if not kw:
+                    continue
+                conditions.append("""
+                    (well_name ILIKE %s OR qk ILIKE %s OR ktxm ILIKE %s)
+                """)
+                like_pattern = f"%{kw}%"
+                params.extend([like_pattern, like_pattern, like_pattern])
+            
+            if not conditions:
+                # 所有关键词都是空的
+                query = f"""
+                    SELECT well_name, qk, jx, sjjs, sjrq, ktxm
+                    FROM oil_wells 
+                    WHERE is_deleted = false
+                    ORDER BY created_at DESC
+                    LIMIT %s
+                """
+                cursor.execute(query, (limit,))
+            else:
+                query = f"""
+                    SELECT well_name, qk, jx, sjjs, sjrq, ktxm
+                    FROM oil_wells 
+                    WHERE is_deleted = false AND ({' OR '.join(conditions)})
+                    ORDER BY created_at DESC
+                    LIMIT %s
+                """
+                params.append(limit)
+                cursor.execute(query, params)
+        
+        results = cursor.fetchall()
+        
+        # 转换为字典列表
+        wells = [dict(row) for row in results]
+        
+        # 权限过滤
+        wells = filter_wells_by_permission(wells, user_role, user_id, user_email)
+        
+        if not wells:
+            keywords_str = "、".join([k for k in keywords if k]) if keywords else "全部"
+            return f"未找到匹配关键词 '{keywords_str}' 的井。"
+        
+        # 格式化输出
+        data = []
+        for w in wells:
+            data.append({
+                "井名": w.get('well_name', ''),
+                "区块": w.get('qk', ''),
+                "井型": w.get('jx', ''),
+                "设计井深(m)": float(w.get('sjjs', 0)) if w.get('sjjs') else 0,
+                "设计日期": str(w.get('sjrq', '')) if w.get('sjrq') else '',
+                "项目": w.get('ktxm', '')
+            })
+        
+        keywords_str = "、".join([k for k in keywords if k]) if keywords else "全部"
+        return f"### 🔍 搜索结果（关键词：{keywords_str}，共 {len(wells)} 口井）\n\n{df_to_markdown(pd.DataFrame(data))}"
+    
+    finally:
+        cursor.close()
+        conn.close()
 
 @AuditLog.trace("get_well_summary")
 def get_well_summary(well_ids: List[str] = None, well_id: str = None, user_role: str = "GUEST", user_id: str = "unknown", user_email: str = "unknown") -> str:
@@ -2009,6 +2167,17 @@ if __name__ == "__main__":
     print("  ✓ 多井对比分析（速度、事故、绩效）")
     print("  ✓ 周报/月报生成（单井和区块级别）")
     print("  ✓ 泥浆参数追踪（密度、粘度、pH）")
+    print("  ✓ 支持切换模拟数据/真实数据库")
+    
+    # 显示数据源模式
+    if USE_REAL_DB:
+        print("\n🗄️  数据源：PostgreSQL真实数据库")
+        print(f"   数据库配置: {DB_CONFIG['host']}:{DB_CONFIG['port']}/{DB_CONFIG['database']}")
+        print("   提示：使用真实油井数据，需确保数据库连接正常")
+    else:
+        print("\n🗄️  数据源：SQLite内存模拟数据")
+        print("   提示：使用模拟数据进行测试")
+        print("   切换到真实数据：设置环境变量 USE_REAL_DB=true")
     
     # 显示当前权限模式
     if DEV_MODE:
