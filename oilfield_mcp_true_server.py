@@ -574,6 +574,49 @@ async def handle_sse_post(request: Request):
                             },
                             "required": []
                         }
+                    },
+                    {
+                        "name": "get_drilling_daily",
+                        "description": "查询钻井工程日报数据 - 支持按井号、日期范围查询",
+                        "inputSchema": {
+                            "type": "object",
+                            "properties": {
+                                "well_id": {"type": "string", "description": "井号"},
+                                "start_date": {"type": "string", "description": "开始日期（YYYY-MM-DD）"},
+                                "end_date": {"type": "string", "description": "结束日期（YYYY-MM-DD）"},
+                                "limit": {"type": "integer", "default": 100, "description": "返回结果数量限制"}
+                            },
+                            "required": []
+                        }
+                    },
+                    {
+                        "name": "get_drilling_pre_daily",
+                        "description": "查询钻前工程日报数据 - 支持按项目、年度、井号查询",
+                        "inputSchema": {
+                            "type": "object",
+                            "properties": {
+                                "project": {"type": "string", "description": "勘探项目"},
+                                "year": {"type": "integer", "description": "实施年度"},
+                                "well_id": {"type": "string", "description": "井号"},
+                                "limit": {"type": "integer", "default": 50, "description": "返回结果数量限制"}
+                            },
+                            "required": []
+                        }
+                    },
+                    {
+                        "name": "get_key_well_daily",
+                        "description": "查询重点井试采日报数据 - 支持按井号、日期范围、区块查询，包括生产数据和压力参数",
+                        "inputSchema": {
+                            "type": "object",
+                            "properties": {
+                                "well_id": {"type": "string", "description": "井号"},
+                                "start_date": {"type": "string", "description": "开始日期（YYYY-MM-DD）"},
+                                "end_date": {"type": "string", "description": "结束日期（YYYY-MM-DD）"},
+                                "block": {"type": "string", "description": "区块"},
+                                "limit": {"type": "integer", "default": 100, "description": "返回结果数量限制"}
+                            },
+                            "required": []
+                        }
                     }
                 ]
                 
@@ -636,6 +679,37 @@ async def handle_sse_post(request: Request):
                     elif tool_name == "get_statistics":
                         result_text = get_statistics(
                             group_by=tool_args.get('group_by', 'block'),
+                            user_role=user_role,
+                            user_id=user_id,
+                            user_email=user_email
+                        )
+                    elif tool_name == "get_drilling_daily":
+                        result_text = get_drilling_daily(
+                            well_id=tool_args.get('well_id', ''),
+                            start_date=tool_args.get('start_date', ''),
+                            end_date=tool_args.get('end_date', ''),
+                            limit=tool_args.get('limit', 100),
+                            user_role=user_role,
+                            user_id=user_id,
+                            user_email=user_email
+                        )
+                    elif tool_name == "get_drilling_pre_daily":
+                        result_text = get_drilling_pre_daily(
+                            project=tool_args.get('project', ''),
+                            year=tool_args.get('year'),
+                            well_id=tool_args.get('well_id', ''),
+                            limit=tool_args.get('limit', 50),
+                            user_role=user_role,
+                            user_id=user_id,
+                            user_email=user_email
+                        )
+                    elif tool_name == "get_key_well_daily":
+                        result_text = get_key_well_daily(
+                            well_id=tool_args.get('well_id', ''),
+                            start_date=tool_args.get('start_date', ''),
+                            end_date=tool_args.get('end_date', ''),
+                            block=tool_args.get('block', ''),
+                            limit=tool_args.get('limit', 100),
                             user_role=user_role,
                             user_id=user_id,
                             user_email=user_email
@@ -810,6 +884,49 @@ async def handle_list_tools():
                 },
                 "required": []
             }
+        ),
+        Tool(
+            name="get_drilling_daily",
+            description="查询钻井工程日报数据 - 支持按井号、日期范围查询",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "well_id": {"type": "string", "description": "井号"},
+                    "start_date": {"type": "string", "description": "开始日期（YYYY-MM-DD）"},
+                    "end_date": {"type": "string", "description": "结束日期（YYYY-MM-DD）"},
+                    "limit": {"type": "integer", "default": 100, "description": "返回结果数量限制"}
+                },
+                "required": []
+            }
+        ),
+        Tool(
+            name="get_drilling_pre_daily",
+            description="查询钻前工程日报数据 - 支持按项目、年度、井号查询",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "project": {"type": "string", "description": "勘探项目"},
+                    "year": {"type": "integer", "description": "实施年度"},
+                    "well_id": {"type": "string", "description": "井号"},
+                    "limit": {"type": "integer", "default": 50, "description": "返回结果数量限制"}
+                },
+                "required": []
+            }
+        ),
+        Tool(
+            name="get_key_well_daily",
+            description="查询重点井试采日报数据 - 支持按井号、日期范围、区块查询，包括生产数据和压力参数",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "well_id": {"type": "string", "description": "井号"},
+                    "start_date": {"type": "string", "description": "开始日期（YYYY-MM-DD）"},
+                    "end_date": {"type": "string", "description": "结束日期（YYYY-MM-DD）"},
+                    "block": {"type": "string", "description": "区块"},
+                    "limit": {"type": "integer", "default": 100, "description": "返回结果数量限制"}
+                },
+                "required": []
+            }
         )
     ]
 
@@ -866,6 +983,37 @@ async def handle_call_tool(name: str, arguments: dict):
         elif name == "get_statistics":
             result = get_statistics(
                 group_by=arguments.get('group_by', 'block'),
+                user_role=user_role,
+                user_id=user_id,
+                user_email=user_email
+            )
+        elif name == "get_drilling_daily":
+            result = get_drilling_daily(
+                well_id=arguments.get('well_id', ''),
+                start_date=arguments.get('start_date', ''),
+                end_date=arguments.get('end_date', ''),
+                limit=arguments.get('limit', 100),
+                user_role=user_role,
+                user_id=user_id,
+                user_email=user_email
+            )
+        elif name == "get_drilling_pre_daily":
+            result = get_drilling_pre_daily(
+                project=arguments.get('project', ''),
+                year=arguments.get('year'),
+                well_id=arguments.get('well_id', ''),
+                limit=arguments.get('limit', 50),
+                user_role=user_role,
+                user_id=user_id,
+                user_email=user_email
+            )
+        elif name == "get_key_well_daily":
+            result = get_key_well_daily(
+                well_id=arguments.get('well_id', ''),
+                start_date=arguments.get('start_date', ''),
+                end_date=arguments.get('end_date', ''),
+                block=arguments.get('block', ''),
+                limit=arguments.get('limit', 100),
                 user_role=user_role,
                 user_id=user_id,
                 user_email=user_email
@@ -1223,6 +1371,239 @@ def get_statistics(group_by: str = "block", user_role: str = "GUEST", user_id: s
 
 ---
 💡 **可视化建议**：此数据适合用 **{chart_type}** 展示，可以更直观地{chart_description}。"""
+    
+    finally:
+        cursor.close()
+        conn.close()
+
+@AuditLog.trace("get_drilling_daily")
+def get_drilling_daily(well_id: str = "", start_date: str = "", end_date: str = "", limit: int = 100, user_role: str = "GUEST", user_id: str = "unknown", user_email: str = "unknown") -> str:
+    """查询钻井工程日报数据 - 真实数据库"""
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    
+    try:
+        query = "SELECT * FROM drilling_daily WHERE is_deleted = false"
+        params = []
+        
+        # 井号过滤
+        if well_id:
+            # 先检查权限
+            if not PermissionService.check_well_access(user_role, well_id):
+                return f"🚫 权限拒绝：无权访问井号 {well_id} 的日报数据。"
+            query += " AND jh = %s"
+            params.append(well_id)
+        
+        # 日期范围过滤
+        if start_date:
+            query += " AND rq >= %s"
+            params.append(start_date)
+        
+        if end_date:
+            query += " AND rq <= %s"
+            params.append(end_date)
+        
+        query += " ORDER BY rq DESC LIMIT %s"
+        params.append(limit)
+        
+        cursor.execute(query, params)
+        results = cursor.fetchall()
+        
+        if not results:
+            well_filter = f"井号 '{well_id}'" if well_id else ""
+            date_filter = f"日期 {start_date} 到 {end_date}" if start_date or end_date else ""
+            filter_str = " & ".join([f for f in [well_filter, date_filter] if f])
+            return f"❌ 未找到匹配条件的钻井日报数据。（{filter_str}）"
+        
+        # 格式化输出
+        data = []
+        for row in results:
+            data.append({
+                "日期": str(row['rq']) if row['rq'] else '',
+                "井号": row['jh'] or '未记录',
+                "当日井深(m)": float(row['drjs']) if row['drjs'] else '',
+                "日进尺(m)": float(row['zjrjc']) if row['zjrjc'] else '',
+                "钻头类型": row['ztlx'] or '',
+                "钻速(m/h)": float(row['zs']) if row['zs'] else '',
+                "泵压(MPa)": float(row['bya']) if row['bya'] else '',
+                "钻井液密度": float(row['zjymd']) if row['zjymd'] else ''
+            })
+        
+        title = f"🔨 钻井工程日报"
+        if well_id:
+            title += f" - 井号: {well_id}"
+        if start_date or end_date:
+            title += f" ({start_date} 至 {end_date})"
+        
+        return f"### {title}\n\n**共 {len(data)} 条记录**\n\n{df_to_markdown(pd.DataFrame(data))}"
+    
+    finally:
+        cursor.close()
+        conn.close()
+
+@AuditLog.trace("get_drilling_pre_daily")
+def get_drilling_pre_daily(project: str = "", year: int = None, well_id: str = "", limit: int = 50, user_role: str = "GUEST", user_id: str = "unknown", user_email: str = "unknown") -> str:
+    """查询钻前工程日报数据 - 真实数据库"""
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    
+    try:
+        query = "SELECT * FROM drilling_pre_daily WHERE is_deleted = false"
+        params = []
+        
+        # 项目过滤
+        if project:
+            query += " AND ktxm ILIKE %s"
+            params.append(f"%{project}%")
+        
+        # 年度过滤
+        if year is not None:
+            query += " AND ssnd = %s"
+            params.append(year)
+        
+        # 井号过滤
+        if well_id:
+            # 先检查权限
+            if not PermissionService.check_well_access(user_role, well_id):
+                return f"🚫 权限拒绝：无权访问井号 {well_id} 的钻前日报数据。"
+            query += " AND jh = %s"
+            params.append(well_id)
+        
+        query += " ORDER BY ssnd DESC, ktxm LIMIT %s"
+        params.append(limit)
+        
+        cursor.execute(query, params)
+        results = cursor.fetchall()
+        
+        if not results:
+            filter_str = []
+            if project:
+                filter_str.append(f"项目 '{project}'")
+            if year:
+                filter_str.append(f"年度 {year}")
+            if well_id:
+                filter_str.append(f"井号 '{well_id}'")
+            filter_text = " & ".join(filter_str) if filter_str else "条件"
+            return f"❌ 未找到匹配 {filter_text} 的钻前日报数据。"
+        
+        # 格式化输出 - 显示关键时间节点
+        data = []
+        for row in results:
+            data.append({
+                "井号": row['jh'] or '未记录',
+                "项目": row['ktxm'] or '',
+                "年度": row['ssnd'] or '',
+                "井位论证": str(row['jwzysj']) if row['jwzysj'] else '—',
+                "工程设计审批": str(row['zjgcsjspsj']) if row['zjgcsjspsj'] else '—',
+                "环评下达": str(row['hpxdsj']) if row['hpxdsj'] else '—',
+                "搬家安装": f"{row['bjkssj']} 至 {row['bjjssj']}" if row['bjkssj'] and row['bjjssj'] else '—'
+            })
+        
+        title = "🏗️ 钻前工程日报"
+        filters = []
+        if project:
+            filters.append(f"项目: {project}")
+        if year:
+            filters.append(f"年度: {year}")
+        if well_id:
+            filters.append(f"井号: {well_id}")
+        if filters:
+            title += f" ({' | '.join(filters)})"
+        
+        return f"### {title}\n\n**共 {len(data)} 条记录**\n\n{df_to_markdown(pd.DataFrame(data))}"
+    
+    finally:
+        cursor.close()
+        conn.close()
+
+@AuditLog.trace("get_key_well_daily")
+def get_key_well_daily(well_id: str = "", start_date: str = "", end_date: str = "", block: str = "", limit: int = 100, user_role: str = "GUEST", user_id: str = "unknown", user_email: str = "unknown") -> str:
+    """查询重点井试采日报数据 - 真实数据库"""
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    
+    try:
+        query = "SELECT * FROM key_well_daily WHERE is_deleted = false"
+        params = []
+        
+        # 井号过滤
+        if well_id:
+            # 先检查权限
+            if not PermissionService.check_well_access(user_role, well_id):
+                return f"🚫 权限拒绝：无权访问井号 {well_id} 的重点井日报数据。"
+            query += " AND jh = %s"
+            params.append(well_id)
+        
+        # 区块过滤
+        if block:
+            if not PermissionService.check_block_access(user_role, block):
+                return f"🚫 权限拒绝：无权访问区块 {block} 的重点井日报数据。"
+            query += " AND qk ILIKE %s"
+            params.append(f"%{block}%")
+        
+        # 日期范围过滤
+        if start_date:
+            query += " AND rq >= %s"
+            params.append(start_date)
+        
+        if end_date:
+            query += " AND rq <= %s"
+            params.append(end_date)
+        
+        query += " ORDER BY rq DESC LIMIT %s"
+        params.append(limit)
+        
+        cursor.execute(query, params)
+        results = cursor.fetchall()
+        
+        if not results:
+            filter_items = []
+            if well_id:
+                filter_items.append(f"井号 '{well_id}'")
+            if block:
+                filter_items.append(f"区块 '{block}'")
+            if start_date or end_date:
+                date_range = f"{start_date or '—'} 到 {end_date or '—'}"
+                filter_items.append(f"日期 {date_range}")
+            filter_str = " & ".join(filter_items) if filter_items else "条件"
+            return f"❌ 未找到匹配 {filter_str} 的重点井日报数据。"
+        
+        # 格式化输出 - 包括生产数据和压力参数
+        data = []
+        for row in results:
+            pressure_info = []
+            if row['yysx'] is not None or row['yyxx'] is not None:
+                pressure_info.append(f"油压: {row['yysx']}-{row['yyxx']}MPa")
+            if row['tysx'] is not None or row['tyxx'] is not None:
+                pressure_info.append(f"套压: {row['tysx']}-{row['tyxx']}MPa")
+            if row['hysx'] is not None or row['hyxx'] is not None:
+                pressure_info.append(f"回压: {row['hysx']}-{row['hyxx']}MPa")
+            
+            data.append({
+                "日期": str(row['rq']) if row['rq'] else '',
+                "井号": row['jh'] or '未记录',
+                "区块": row['qk'] or '',
+                "层位": row['cw'] or '',
+                "状态": row['zt'] or '',
+                "日产气量(万方)": float(row['rcql']) if row['rcql'] else '',
+                "含水(%)": float(row['hs']) if row['hs'] else '',
+                "油嘴": row['yz'] or '',
+                "压力参数": ' | '.join(pressure_info) if pressure_info else '—'
+            })
+        
+        title = "⛽ 重点井试采日报"
+        filters = []
+        if well_id:
+            filters.append(f"井号: {well_id}")
+        if block:
+            filters.append(f"区块: {block}")
+        if start_date or end_date:
+            date_range = f"{start_date or '—'} 至 {end_date or '—'}"
+            filters.append(f"日期: {date_range}")
+        if filters:
+            title += f" ({' | '.join(filters)})"
+        
+        return f"### {title}\n\n**共 {len(data)} 条记录**\n\n{df_to_markdown(pd.DataFrame(data))}"
     
     finally:
         cursor.close()

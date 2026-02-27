@@ -79,7 +79,7 @@ CREATE INDEX IF NOT EXISTS idx_ktxm_ktzxm ON oil_wells(ktxm, ktzxm);
 -- 添加列注释
 COMMENT ON TABLE oil_wells IS '油井基础信息表 - 存储油井的完整勘探和设计数据';
 COMMENT ON COLUMN oil_wells.id IS '主键ID';
-COMMENT ON COLUMN oil_wells.well_name IS '井名 (D阱)';
+COMMENT ON COLUMN oil_wells.well_name IS '井名';
 COMMENT ON COLUMN oil_wells.ktxmlb IS '勘探项目类别';
 COMMENT ON COLUMN oil_wells.ktxm IS '勘探项目';
 COMMENT ON COLUMN oil_wells.ktzxm IS '勘探子项目';
