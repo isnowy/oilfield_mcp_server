@@ -523,7 +523,7 @@ async def handle_sse_post(request: Request):
                             "properties": {
                                 "keywords": {"type": "array", "items": {"type": "string"}, "description": "搜索关键词列表（井号、区块等）。留空返回所有油井"},
                                 "keyword": {"type": "string", "description": "单个搜索关键词（兼容旧接口）。空字符串''返回所有油井"},
-                                "limit": {"type": "integer", "default": 50, "description": "返回结果数量限制"}
+                                "limit": {"type": "integer", "default": 500, "description": "返回结果数量限制（默认500，最大10000）"}
                             },
                             "required": []
                         }
@@ -647,7 +647,7 @@ async def handle_sse_post(request: Request):
                         result_text = search_wells(
                             keywords=tool_args.get('keywords'),
                             keyword=tool_args.get('keyword', ''),
-                            limit=tool_args.get('limit', 50),
+                            limit=tool_args.get('limit', 500),
                             user_role=user_role,
                             user_id=user_id,
                             user_email=user_email
@@ -833,7 +833,7 @@ async def handle_list_tools():
                 "properties": {
                     "keywords": {"type": "array", "items": {"type": "string"}, "description": "搜索关键词列表。留空可返回所有油井"},
                     "keyword": {"type": "string", "description": "单个搜索关键词（兼容旧接口）。设为空字符串''可返回所有油井"},
-                    "limit": {"type": "integer", "default": 50, "description": "返回结果数量限制"}
+                    "limit": {"type": "integer", "default": 500, "description": "返回结果数量限制（默认500，最大10000）"}
                 },
                 "required": []
             }
@@ -951,7 +951,7 @@ async def handle_call_tool(name: str, arguments: dict):
             result = search_wells(
                 keywords=arguments.get('keywords'),
                 keyword=arguments.get('keyword', ''),
-                limit=arguments.get('limit', 50),
+                limit=arguments.get('limit', 500),
                 user_role=user_role,
                 user_id=user_id,
                 user_email=user_email
@@ -1033,7 +1033,7 @@ async def handle_call_tool(name: str, arguments: dict):
 # ==========================================
 
 @AuditLog.trace("search_wells")
-def search_wells(keywords: List[str] = None, keyword: str = None, limit: int = 50, user_role: str = "GUEST", user_id: str = "unknown", user_email: str = "unknown") -> str:
+def search_wells(keywords: List[str] = None, keyword: str = None, limit: int = 500, user_role: str = "GUEST", user_id: str = "unknown", user_email: str = "unknown") -> str:
     """搜索油井 - 真实数据库"""
     # 兼容旧接口
     if keywords is None:
@@ -1046,8 +1046,141 @@ def search_wells(keywords: List[str] = None, keyword: str = None, limit: int = 5
     cursor = conn.cursor()
     
     try:
-        # 如果没有关键词，返回所有油井
-        if not keywords or (len(keywords) == 1 and not keywords[0]):
+        # 判断是否为"查询所有"（无关键词或空关键词）
+        is_query_all = not keywords or (len(keywords) == 1 and not keywords[0])
+        
+        # 如果是查询所有，先检查总数
+        if is_query_all:
+            cursor.execute("SELECT COUNT(*) as count FROM oil_wells WHERE is_deleted = false")
+            total_count = cursor.fetchone()['count']
+            
+            # 如果总数超过200，返回统计摘要而不是详细列表
+            if total_count > 200:
+                logger.info(f"📊 数据量较大({total_count}口井)，返回统计摘要")
+                
+                # 1. 按区块统计
+                cursor.execute("""
+                    SELECT qk, COUNT(*) as count, AVG(sjjs) as avg_depth
+                    FROM oil_wells 
+                    WHERE is_deleted = false AND qk IS NOT NULL AND qk != ''
+                    GROUP BY qk
+                    ORDER BY count DESC
+                    LIMIT 10
+                """)
+                block_stats = cursor.fetchall()
+                
+                # 2. 按项目统计
+                cursor.execute("""
+                    SELECT ktxm, COUNT(*) as count
+                    FROM oil_wells 
+                    WHERE is_deleted = false AND ktxm IS NOT NULL AND ktxm != ''
+                    GROUP BY ktxm
+                    ORDER BY count DESC
+                    LIMIT 10
+                """)
+                project_stats = cursor.fetchall()
+                
+                # 3. 按井型统计
+                cursor.execute("""
+                    SELECT jx, COUNT(*) as count
+                    FROM oil_wells 
+                    WHERE is_deleted = false AND jx IS NOT NULL AND jx != ''
+                    GROUP BY jx
+                    ORDER BY count DESC
+                """)
+                well_type_stats = cursor.fetchall()
+                
+                # 4. 按年份统计
+                cursor.execute("""
+                    SELECT EXTRACT(YEAR FROM sjrq) as year, COUNT(*) as count
+                    FROM oil_wells 
+                    WHERE is_deleted = false AND sjrq IS NOT NULL
+                    GROUP BY EXTRACT(YEAR FROM sjrq)
+                    ORDER BY year DESC
+                    LIMIT 10
+                """)
+                year_stats = cursor.fetchall()
+                
+                # 构建统计报告
+                report = f"""### 📊 油井数据统计摘要
+
+**💡 提示**：由于数据量较大（共 **{total_count}** 口井），为提高查询效率，这里展示统计摘要。如需查看详细列表，请使用更具体的查询条件（如指定区块、项目或井号）。
+
+---
+
+#### 📈 总体概况
+- **总井数**：{total_count} 口
+- **数据完整性**：{len(block_stats)} 个区块，{len(project_stats)} 个项目
+
+---
+
+#### 🗺️ 区块分布（前10名）
+
+"""
+                if block_stats:
+                    block_data = []
+                    for row in block_stats:
+                        block_data.append({
+                            "区块": row['qk'],
+                            "井数": row['count'],
+                            "平均井深(m)": round(float(row['avg_depth']), 2) if row['avg_depth'] else 0
+                        })
+                    report += df_to_markdown(pd.DataFrame(block_data)) + "\n\n"
+                else:
+                    report += "无区块数据\n\n"
+                
+                report += "---\n\n#### 📋 项目分布（前10名）\n\n"
+                if project_stats:
+                    project_data = []
+                    for row in project_stats:
+                        project_data.append({
+                            "项目名称": row['ktxm'],
+                            "井数": row['count']
+                        })
+                    report += df_to_markdown(pd.DataFrame(project_data)) + "\n\n"
+                else:
+                    report += "无项目数据\n\n"
+                
+                report += "---\n\n#### 🔧 井型分布\n\n"
+                if well_type_stats:
+                    well_type_data = []
+                    for row in well_type_stats:
+                        well_type_data.append({
+                            "井型": row['jx'],
+                            "井数": row['count'],
+                            "占比": f"{round(row['count']/total_count*100, 1)}%"
+                        })
+                    report += df_to_markdown(pd.DataFrame(well_type_data)) + "\n\n"
+                else:
+                    report += "无井型数据\n\n"
+                
+                report += "---\n\n#### 📅 年份分布（前10年）\n\n"
+                if year_stats:
+                    year_data = []
+                    for row in year_stats:
+                        year_data.append({
+                            "年份": int(row['year']) if row['year'] else '未知',
+                            "井数": row['count']
+                        })
+                    report += df_to_markdown(pd.DataFrame(year_data)) + "\n\n"
+                else:
+                    report += "无年份数据\n\n"
+                
+                report += """---
+
+#### 💡 查询建议
+
+如需查看详细井列表，请尝试：
+- **按区块查询**：使用 `get_wells_by_block` 工具
+- **按项目查询**：使用 `get_wells_by_project` 工具
+- **按井号搜索**：使用 `search_wells` 并指定井号关键词
+- **查看详情**：使用 `get_well_details` 查询特定井的完整信息
+"""
+                
+                return report
+        
+        # 正常查询流程（有关键词或总数≤200）
+        if is_query_all:
             query = f"""
                 SELECT well_name, qk, jx, sjjs, sjrq, ktxm
                 FROM oil_wells 
@@ -1071,7 +1204,7 @@ def search_wells(keywords: List[str] = None, keyword: str = None, limit: int = 5
                 params.extend([like_pattern, like_pattern, like_pattern])
             
             if not conditions:
-                # 所有关键词都是空的
+                # 所有关键词都是空的，按查询所有处理
                 query = f"""
                     SELECT well_name, qk, jx, sjjs, sjrq, ktxm
                     FROM oil_wells 
@@ -1631,6 +1764,11 @@ if __name__ == "__main__":
     print("  ✓ 按区块、项目查询")
     print("  ✓ 统计分析功能")
     print("  ✓ 基于角色的权限控制")
+    print("  ✓ 智能统计（数据量>200时自动切换）")
+    print("\n📊 日报查询：")
+    print("  ✓ 钻井工程日报（drilling_daily）")
+    print("  ✓ 钻前工程日报（drilling_pre_daily）")
+    print("  ✓ 重点井试采日报（key_well_daily）")
     
     # 显示当前权限模式
     if DEV_MODE:
