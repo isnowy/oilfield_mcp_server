@@ -1,0 +1,31 @@
+# LibreChat MCP 配置文件 - HTTP/SSE 方式（推荐）
+# 说明：使用 HTTP 方式，数据库配置在服务器启动时设置，配置文件中不暴露敏感信息
+
+mcpServers:
+  # 油井基础数据 MCP Server
+  oilfield-wells:
+    type: http
+    url: "http://localhost:8081/sse"
+    
+    # ⭐ 通过 headers 传递用户信息实现动态权限控制
+    headers:
+      X-User-Role: "{{LIBRECHAT_USER_ROLE}}"
+      X-User-Email: "{{LIBRECHAT_USER_EMAIL}}"
+      X-User-ID: "{{LIBRECHAT_USER_ID}}"
+    
+    title: "Oilfield Wells Data Service"
+    description: "Oil well search, details query, and statistical analysis with role-based access control"
+  
+  # 日报系统 MCP Server
+  oilfield-dailyreports:
+    type: http
+    url: "http://localhost:8082/sse"
+    
+    # ⭐ 通过 headers 传递用户信息实现动态权限控制
+    headers:
+      X-User-Role: "{{LIBRECHAT_USER_ROLE}}"
+      X-User-Email: "{{LIBRECHAT_USER_EMAIL}}"
+      X-User-ID: "{{LIBRECHAT_USER_ID}}"
+    
+    title: "Oilfield Daily Reports Service"
+    description: "Drilling daily reports, pre-drilling reports, and key well trial production reports with role-based access control"
