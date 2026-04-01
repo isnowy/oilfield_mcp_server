@@ -21,10 +21,12 @@ from pydantic import BaseModel
 import uvicorn
 
 # 导入共享模块
-from common.db import get_db_connection, test_db_connection, DB_CONFIG
+from common.db import get_db_connection, test_db_connection, execute_write, DB_CONFIG
 from common.permissions import PermissionService, DEV_MODE
 from common.utils import df_to_markdown
 from common.audit import AuditLog
+
+WRITE_ALLOWED_ROLES = {"ADMIN", "ENGINEER"}
 
 # ==========================================
 # 日志配置
@@ -99,9 +101,9 @@ app.add_middleware(
 async def root():
     return {
         "service": "油井日报系统 MCP Server",
-        "version": "1.0.0",
+        "version": "1.1.0",
         "status": "running",
-        "tools": 3
+        "tools": 6
     }
 
 @app.get("/health")
@@ -299,6 +301,93 @@ async def handle_list_tools():
                 },
                 "required": []
             }
+        ),
+        Tool(
+            name="save_drilling_daily",
+            description="将从文档中提取的钻井工程日报数据保存到数据库。需要 ENGINEER 或 ADMIN 角色权限。",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "jh": {"type": "string", "description": "井号（必填）"},
+                    "rq": {"type": "string", "description": "日期（YYYY-MM-DD，必填）"},
+                    "kzrq": {"type": "string", "description": "开钻日期（YYYY-MM-DD）"},
+                    "drjs": {"type": "number", "description": "当日井深（米）"},
+                    "zjrjc": {"type": "number", "description": "日进尺（米）"},
+                    "ztlx": {"type": "string", "description": "钻头类型"},
+                    "ztzj": {"type": "number", "description": "钻头直径（毫米）"},
+                    "zy": {"type": "number", "description": "钻压（千牛）"},
+                    "zs": {"type": "number", "description": "钻速（米/小时）"},
+                    "bya": {"type": "number", "description": "泵压（兆帕）"},
+                    "bpl": {"type": "number", "description": "排量（升/秒）"},
+                    "zjymd": {"type": "number", "description": "钻井液密度（克/立方厘米）"},
+                    "zjynd": {"type": "number", "description": "钻井液粘度（秒）"},
+                    "czjljsj": {"type": "number", "description": "纯钻进累计时间（小时）"},
+                    "brzygz": {"type": "string", "description": "本日主要工作"}
+                },
+                "required": ["jh", "rq"]
+            }
+        ),
+        Tool(
+            name="save_drilling_pre_daily",
+            description="将从文档中提取的钻前工程日报数据保存到数据库。需要 ENGINEER 或 ADMIN 角色权限。",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "jh": {"type": "string", "description": "井号（必填）"},
+                    "ktxm": {"type": "string", "description": "勘探项目（必填）"},
+                    "ssnd": {"type": "integer", "description": "实施年度"},
+                    "jwzysj": {"type": "string", "description": "井位论证时间（YYYY-MM-DD）"},
+                    "jwtjxdsj": {"type": "string", "description": "井位条件下达时间（YYYY-MM-DD）"},
+                    "jwtclsj": {"type": "string", "description": "井位测量时间（YYYY-MM-DD）"},
+                    "tzxdsj": {"type": "string", "description": "投资下达时间（YYYY-MM-DD）"},
+                    "kjcgcwsj": {"type": "string", "description": "勘界成果完成时间（YYYY-MM-DD）"},
+                    "hpsbsj": {"type": "string", "description": "环评上报时间（YYYY-MM-DD）"},
+                    "ydsqsbsj": {"type": "string", "description": "用地申请上报时间（YYYY-MM-DD）"},
+                    "gcfatlsj": {"type": "string", "description": "工程方案讨论时间（YYYY-MM-DD）"},
+                    "zjdzsjspsj": {"type": "string", "description": "钻井地质设计审批时间（YYYY-MM-DD）"},
+                    "zjgcsjspsj": {"type": "string", "description": "钻井工程设计审批时间（YYYY-MM-DD）"},
+                    "hpxdsj": {"type": "string", "description": "环评下达时间（YYYY-MM-DD）"},
+                    "zdcwsj": {"type": "string", "description": "征地完成时间（YYYY-MM-DD）"},
+                    "tlsksj": {"type": "string", "description": "探临开始时间（YYYY-MM-DD）"},
+                    "tljssj": {"type": "string", "description": "探临结束时间（YYYY-MM-DD）"},
+                    "bjkssj": {"type": "string", "description": "搬家安装开始时间（YYYY-MM-DD）"},
+                    "bjjssj": {"type": "string", "description": "搬家安装结束时间（YYYY-MM-DD）"}
+                },
+                "required": ["jh", "ktxm"]
+            }
+        ),
+        Tool(
+            name="save_key_well_daily",
+            description="将从文档中提取的重点井试采日报数据保存到数据库。需要 ENGINEER 或 ADMIN 角色权限。",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "jh": {"type": "string", "description": "井号（必填）"},
+                    "rq": {"type": "string", "description": "日期（YYYY-MM-DD，必填）"},
+                    "qk": {"type": "string", "description": "区块"},
+                    "cw": {"type": "string", "description": "层位"},
+                    "cxh": {"type": "string", "description": "层序号"},
+                    "djsd1": {"type": "number", "description": "顶界深度1（米）"},
+                    "djsd2": {"type": "number", "description": "底界深度2（米）"},
+                    "zt": {"type": "string", "description": "状态"},
+                    "cyfs": {"type": "string", "description": "采油方式"},
+                    "yz": {"type": "string", "description": "油嘴"},
+                    "gzsj": {"type": "string", "description": "工作时间"},
+                    "gzzd": {"type": "string", "description": "工作制度"},
+                    "rcql": {"type": "number", "description": "日产气量（万方）"},
+                    "hs": {"type": "number", "description": "含水（%）"},
+                    "yysx": {"type": "number", "description": "油压上限（兆帕）"},
+                    "yyxx": {"type": "number", "description": "油压下限（兆帕）"},
+                    "tysx": {"type": "number", "description": "套压上限（兆帕）"},
+                    "tyxx": {"type": "number", "description": "套压下限（兆帕）"},
+                    "hysx": {"type": "number", "description": "回压上限（兆帕）"},
+                    "hyxx": {"type": "number", "description": "回压下限（兆帕）"},
+                    "d_ly": {"type": "number", "description": "流压"},
+                    "d_jy": {"type": "number", "description": "静压"},
+                    "d_bz": {"type": "string", "description": "施工内容/备注"}
+                },
+                "required": ["jh", "rq"]
+            }
         )
     ]
 
@@ -342,6 +431,27 @@ async def handle_call_tool(name: str, arguments: dict):
                 end_date=arguments.get('end_date', ''),
                 block=arguments.get('block', ''),
                 limit=arguments.get('limit', 100),
+                user_role=user_role,
+                user_id=user_id,
+                user_email=user_email
+            )
+        elif name == "save_drilling_daily":
+            result = save_drilling_daily(
+                data=arguments,
+                user_role=user_role,
+                user_id=user_id,
+                user_email=user_email
+            )
+        elif name == "save_drilling_pre_daily":
+            result = save_drilling_pre_daily(
+                data=arguments,
+                user_role=user_role,
+                user_id=user_id,
+                user_email=user_email
+            )
+        elif name == "save_key_well_daily":
+            result = save_key_well_daily(
+                data=arguments,
                 user_role=user_role,
                 user_id=user_id,
                 user_email=user_email
@@ -593,6 +703,170 @@ def get_key_well_daily(well_id: str = "", start_date: str = "", end_date: str = 
         cursor.close()
         conn.close()
 
+def _check_write_permission(user_role: str) -> str | None:
+    """Return an error message string if write is not allowed, else None."""
+    if not DEV_MODE and (user_role or "GUEST").upper() not in WRITE_ALLOWED_ROLES:
+        return f"🚫 权限拒绝：角色 {user_role} 无写入权限，需要 ENGINEER 或 ADMIN 角色。"
+    return None
+
+
+def _parse_number(value: object) -> float | None:
+    if value is None or value == "":
+        return None
+    if isinstance(value, (int, float)):
+        return float(value)
+    if isinstance(value, str):
+        try:
+            return float(value.strip())
+        except ValueError:
+            return None
+    return None
+
+
+def _upsert(table: str, key_cols: list[str], fields: dict, user_email: str) -> str:
+    """Generic UPDATE-then-INSERT upsert returning a status string."""
+    update_cols = [c for c in fields if c not in key_cols]
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    try:
+        if update_cols:
+            assignments = ", ".join(f"{c} = %s" for c in update_cols)
+            where_clause = " AND ".join(f"{c} = %s" for c in key_cols)
+            update_q = (
+                f"UPDATE {table} SET {assignments}, updated_at = CURRENT_TIMESTAMP "
+                f"WHERE {where_clause} RETURNING id"
+            )
+            cursor.execute(update_q, [fields[c] for c in update_cols] + [fields[c] for c in key_cols])
+        else:
+            where_clause = " AND ".join(f"{c} = %s" for c in key_cols)
+            cursor.execute(
+                f"UPDATE {table} SET updated_at = CURRENT_TIMESTAMP WHERE {where_clause} RETURNING id",
+                [fields[c] for c in key_cols],
+            )
+
+        row = cursor.fetchone()
+        if row:
+            conn.commit()
+            logger.info(f"✅ {table} 更新 by {user_email}")
+            return f"✅ 数据已更新（ID: {row['id']}）：{table}，写入字段 {len(update_cols)}。"
+
+        col_str = ", ".join(fields.keys())
+        placeholders = ", ".join(["%s"] * len(fields))
+        cursor.execute(
+            f"INSERT INTO {table} ({col_str}) VALUES ({placeholders}) RETURNING id",
+            list(fields.values()),
+        )
+        inserted = cursor.fetchone()
+        conn.commit()
+        logger.info(f"✅ {table} 新增 by {user_email}")
+        return f"✅ 数据已新增（ID: {inserted['id'] if inserted else '?'}）：{table}，写入字段 {len(fields)}。"
+    except Exception as e:
+        conn.rollback()
+        logger.error(f"数据库写操作失败 ({table}): {e}")
+        raise
+    finally:
+        cursor.close()
+        conn.close()
+
+
+@AuditLog.trace("save_drilling_daily")
+def save_drilling_daily(data: dict, user_role: str = "GUEST",
+                        user_id: str = "unknown", user_email: str = "unknown") -> str:
+    """将文档提取的钻井日报数据保存到数据库"""
+    err = _check_write_permission(user_role)
+    if err:
+        return err
+
+    jh = (data.get("jh") or "").strip()
+    rq = (data.get("rq") or "").strip()
+    if not jh:
+        return "❌ 井号（jh）不能为空。"
+    if not rq:
+        return "❌ 日期（rq）不能为空。"
+
+    allowed = {
+        "jh", "rq", "kzrq", "drjs", "zjrjc", "ztlx", "ztzj",
+        "zy", "zs", "bya", "bpl", "zjymd", "zjynd", "czjljsj", "brzygz",
+    }
+    number_fields = {"drjs", "zjrjc", "ztzj", "zy", "zs", "bya", "bpl", "zjymd", "zjynd", "czjljsj"}
+
+    fields: dict = {"jh": jh, "rq": rq}
+    for k, v in data.items():
+        if k in ("jh", "rq") or k not in allowed or v is None or v == "":
+            continue
+        fields[k] = _parse_number(v) if k in number_fields else v
+
+    return _upsert("drilling_daily", ["jh", "rq"], fields, user_email)
+
+
+@AuditLog.trace("save_drilling_pre_daily")
+def save_drilling_pre_daily(data: dict, user_role: str = "GUEST",
+                            user_id: str = "unknown", user_email: str = "unknown") -> str:
+    """将文档提取的钻前日报数据保存到数据库"""
+    err = _check_write_permission(user_role)
+    if err:
+        return err
+
+    jh = (data.get("jh") or "").strip()
+    ktxm = (data.get("ktxm") or "").strip()
+    if not jh:
+        return "❌ 井号（jh）不能为空。"
+    if not ktxm:
+        return "❌ 勘探项目（ktxm）不能为空。"
+
+    date_fields = {
+        "jwzysj", "jwtjxdsj", "jwtclsj", "tzxdsj", "kjcgcwsj",
+        "hpsbsj", "ydsqsbsj", "gcfatlsj", "zjdzsjspsj", "zjgcsjspsj",
+        "hpxdsj", "zdcwsj", "tlsksj", "tljssj", "bjkssj", "bjjssj",
+    }
+    allowed = {"jh", "ktxm", "ssnd"} | date_fields
+
+    fields: dict = {"jh": jh, "ktxm": ktxm}
+    for k, v in data.items():
+        if k in ("jh", "ktxm") or k not in allowed or v is None or v == "":
+            continue
+        if k == "ssnd":
+            try:
+                fields[k] = int(v)
+            except (ValueError, TypeError):
+                pass
+        else:
+            fields[k] = v
+
+    return _upsert("drilling_pre_daily", ["ktxm", "jh"], fields, user_email)
+
+
+@AuditLog.trace("save_key_well_daily")
+def save_key_well_daily(data: dict, user_role: str = "GUEST",
+                        user_id: str = "unknown", user_email: str = "unknown") -> str:
+    """将文档提取的重点井试采日报数据保存到数据库"""
+    err = _check_write_permission(user_role)
+    if err:
+        return err
+
+    jh = (data.get("jh") or "").strip()
+    rq = (data.get("rq") or "").strip()
+    if not jh:
+        return "❌ 井号（jh）不能为空。"
+    if not rq:
+        return "❌ 日期（rq）不能为空。"
+
+    allowed = {
+        "jh", "rq", "qk", "cw", "cxh", "djsd1", "djsd2", "zt", "cyfs", "yz",
+        "gzsj", "gzzd", "rcql", "hs", "yysx", "yyxx", "tysx", "tyxx",
+        "hysx", "hyxx", "d_ly", "d_jy", "d_bz",
+    }
+    number_fields = {"djsd1", "djsd2", "rcql", "hs", "yysx", "yyxx", "tysx", "tyxx", "hysx", "hyxx", "d_ly", "d_jy"}
+
+    fields: dict = {"jh": jh, "rq": rq}
+    for k, v in data.items():
+        if k in ("jh", "rq") or k not in allowed or v is None or v == "":
+            continue
+        fields[k] = _parse_number(v) if k in number_fields else v
+
+    return _upsert("key_well_daily", ["jh", "rq"], fields, user_email)
+
+
 # ==========================================
 # 主程序入口
 # ==========================================
@@ -612,6 +886,9 @@ if __name__ == "__main__":
     print("  ✓ get_drilling_daily - 钻井工程日报")
     print("  ✓ get_drilling_pre_daily - 钻前工程日报")
     print("  ✓ get_key_well_daily - 重点井试采日报")
+    print("  ✓ save_drilling_daily - 保存钻井日报")
+    print("  ✓ save_drilling_pre_daily - 保存钻前日报")
+    print("  ✓ save_key_well_daily - 保存重点井日报")
     print(f"\n🔒 权限模式: {'开发模式' if DEV_MODE else '生产模式'}")
     print(f"\n🗄️  数据库: {DB_CONFIG['host']}:{DB_CONFIG['port']}/{DB_CONFIG['database']}")
     print("\n🌐 访问地址: http://0.0.0.0:8082")

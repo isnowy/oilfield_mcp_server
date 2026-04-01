@@ -29,3 +29,17 @@ mcpServers:
     
     title: "Oilfield Daily Reports Service"
     description: "Drilling daily reports, pre-drilling reports, and key well trial production reports with role-based access control"
+  
+  # 油田作业数据 MCP Server
+  oilfield-operations:
+    type: http
+    url: "http://localhost:8083/sse"
+    
+    # ⭐ 通过 headers 传递用户信息实现动态权限控制
+    headers:
+      X-User-Role: "{{LIBRECHAT_USER_ROLE}}"
+      X-User-Email: "{{LIBRECHAT_USER_EMAIL}}"
+      X-User-ID: "{{LIBRECHAT_USER_ID}}"
+    
+    title: "Oilfield Operations Data Service"
+    description: "Save analysis data (gas/water samples), workover records, perforation records, and wellbore diagram references"

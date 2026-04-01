@@ -67,3 +67,35 @@ def execute_query(query: str, params: tuple = None):
     finally:
         cursor.close()
         conn.close()
+
+
+def execute_write(query: str, params: tuple = None) -> dict:
+    """
+    执行数据库写操作（INSERT/UPDATE/DELETE）
+    
+    Args:
+        query: SQL写操作语句
+        params: 操作参数
+        
+    Returns:
+        包含 affected_rows 和可选 inserted_id 的字典
+    """
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    
+    try:
+        cursor.execute(query, params)
+        conn.commit()
+        result = {"affected_rows": cursor.rowcount}
+        if cursor.description:
+            row = cursor.fetchone()
+            if row:
+                result["inserted_id"] = row.get("id")
+        return result
+    except Exception as e:
+        conn.rollback()
+        logger.error(f"数据库写操作失败: {e}")
+        raise
+    finally:
+        cursor.close()
+        conn.close()

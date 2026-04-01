@@ -21,7 +21,7 @@ from pydantic import BaseModel
 import uvicorn
 
 # 导入共享模块
-from common.db import get_db_connection, test_db_connection, DB_CONFIG
+from common.db import get_db_connection, test_db_connection, execute_write, DB_CONFIG
 from common.permissions import PermissionService, filter_wells_by_permission, DEV_MODE
 from common.utils import df_to_markdown, normalize_well_id
 from common.audit import AuditLog
@@ -63,7 +63,7 @@ sse_transport = SseServerTransport("/sse")
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """应用生命周期管理"""
-    logger.info("🚀 油井基础数据 MCP Server 启动中...")
+    logger.info("🚀 油井基础数据 MCP Server v1.1.0 启动中...")
     logger.info(f"📍 监听地址: http://0.0.0.0:8081")
     logger.info(f"🔒 权限模式: {'开发模式' if DEV_MODE else '生产模式'}")
     logger.info(f"🗄️  数据库: PostgreSQL @ {DB_CONFIG['host']}:{DB_CONFIG['port']}/{DB_CONFIG['database']}")
@@ -78,8 +78,8 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(
     title="油井基础数据 MCP Server",
-    description="提供油井搜索、详情查询、统计分析等功能",
-    version="1.0.0",
+    description="提供油井搜索、详情查询、统计分析、数据写入等功能",
+    version="1.1.0",
     lifespan=lifespan
 )
 
@@ -99,9 +99,9 @@ app.add_middleware(
 async def root():
     return {
         "service": "油井基础数据 MCP Server",
-        "version": "1.0.0",
+        "version": "1.1.0",
         "status": "running",
-        "tools": 5
+        "tools": 6
     }
 
 @app.get("/health")
@@ -312,6 +312,96 @@ async def handle_list_tools():
                 },
                 "required": []
             }
+        ),
+        Tool(
+            name="save_well_data",
+            description="将从文档中提取的油井基础数据保存到数据库。需要 ENGINEER 或 ADMIN 角色权限。",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "well_name": {
+                        "type": "string",
+                        "description": "井名（必填）"
+                    },
+                    "qk": {
+                        "type": "string",
+                        "description": "区块"
+                    },
+                    "qkdm": {
+                        "type": "string",
+                        "description": "区块代码"
+                    },
+                    "ktxm": {
+                        "type": "string",
+                        "description": "勘探项目"
+                    },
+                    "ktxmlb": {
+                        "type": "string",
+                        "description": "勘探项目类别"
+                    },
+                    "ktzxm": {
+                        "type": "string",
+                        "description": "勘探子项目"
+                    },
+                    "jx": {
+                        "type": "string",
+                        "description": "井型（直井/预探井等）"
+                    },
+                    "jb": {
+                        "type": "string",
+                        "description": "井别"
+                    },
+                    "jh": {
+                        "type": "string",
+                        "description": "井号"
+                    },
+                    "cw": {
+                        "type": "string",
+                        "description": "层位"
+                    },
+                    "sfzdj": {
+                        "type": "string",
+                        "description": "是否重点井"
+                    },
+                    "sjrq": {
+                        "type": "string",
+                        "description": "设计日期（YYYY-MM-DD）"
+                    },
+                    "sjjs": {
+                        "type": "number",
+                        "description": "设计井深（米）"
+                    },
+                    "sjmdc": {
+                        "type": "string",
+                        "description": "设计目的层"
+                    },
+                    "sjwzcw": {
+                        "type": "string",
+                        "description": "设计完钻层位"
+                    },
+                    "ztmd": {
+                        "type": "string",
+                        "description": "钻探目的"
+                    },
+                    "dmhb": {
+                        "type": "number",
+                        "description": "地面海拔"
+                    },
+                    "ss": {
+                        "type": "string",
+                        "description": "所在省市"
+                    },
+                    "htqh": {
+                        "type": "string",
+                        "description": "合同区号"
+                    },
+                    "bz": {
+                        "type": "string",
+                        "description": "备注"
+                    }
+                },
+                "required": ["well_name"]
+            }
         )
     ]
 
@@ -364,6 +454,13 @@ async def handle_call_tool(name: str, arguments: dict):
         elif name == "get_statistics":
             result = get_statistics(
                 group_by=arguments.get('group_by', 'block'),
+                user_role=user_role,
+                user_id=user_id,
+                user_email=user_email
+            )
+        elif name == "save_well_data":
+            result = save_well_data(
+                data=arguments,
                 user_role=user_role,
                 user_id=user_id,
                 user_email=user_email
@@ -751,6 +848,192 @@ def get_statistics(group_by: str = "block",
         cursor.close()
         conn.close()
 
+WRITE_ALLOWED_ROLES = {"ADMIN", "ENGINEER"}
+
+@AuditLog.trace("save_well_data")
+def save_well_data(data: dict, user_role: str = "GUEST",
+                   user_id: str = "unknown", user_email: str = "unknown") -> str:
+    """将文档提取的油井数据保存到数据库"""
+    role_upper = (user_role or "GUEST").upper()
+    if not DEV_MODE and role_upper not in WRITE_ALLOWED_ROLES:
+        return f"🚫 权限拒绝：角色 {user_role} 无写入权限，需要 ENGINEER 或 ADMIN 角色。"
+
+    well_name = (data.get("well_name") or "").strip()
+    if not well_name:
+        return "❌ 井名（well_name）不能为空。"
+
+    # 可写字段白名单（排除审计字段）
+    allowed_fields = {
+        "well_name", "qk", "qkdm", "ktxm", "ktxmlb", "ktzxm",
+        "jx", "jb", "jh", "cw", "sfzdj", "sjrq", "sjjs",
+        "sjzzbx", "sjhzby", "sjmdc", "sjwzcw", "ztmd", "wzyz",
+        "dmhb", "ss", "sywz", "jpdzcx1", "jpdzcx2",
+        "zh1", "zh2", "dcxjl1", "dcxjl2", "htqh", "czr", "lrr", "bz",
+    }
+
+    def parse_bool_to_sfzdj(value: object) -> str | None:
+        if value is None or value == "":
+            return None
+        if isinstance(value, bool):
+            return "是" if value else "否"
+        if isinstance(value, (int, float)):
+            return "是" if float(value) != 0 else "否"
+        if isinstance(value, str):
+            v = value.strip().lower()
+            if v in {"true", "1", "yes", "y", "是", "重点井"}:
+                return "是"
+            if v in {"false", "0", "no", "n", "否", "非重点井"}:
+                return "否"
+        return None
+
+    def parse_number(value: object) -> float | None:
+        if value is None or value == "":
+            return None
+        if isinstance(value, (int, float)):
+            return float(value)
+        if isinstance(value, str):
+            try:
+                return float(value.strip())
+            except ValueError:
+                return None
+        return None
+
+    # 1) Start with any already-correct DB column keys.
+    fields: dict[str, object] = {
+        k: v
+        for k, v in data.items()
+        if k in allowed_fields and v is not None and v != "" and k != "well_name"
+    }
+    fields["well_name"] = well_name
+
+    # 2) Map model output "alias keys" → DB column keys.
+    #    This makes the save flow robust even if the artifact JSON keys differ
+    #    from the DB schema field names.
+    alias_to_column: dict[str, str] = {
+        # block/project
+        "block": "qk",
+        "block_code": "qkdm",
+        "exploration_category": "ktxmlb",
+        "exploration_project": "ktxm",
+        "exploration_subproject": "ktzxm",
+        # well type/category
+        "well_type": "jx",
+        "well_category": "jb",
+        # layer & formations
+        "formation": "cw",  # fallback; can also be used when sjmdc/sjwzcw missing
+        "design_target_formation": "sjmdc",
+        "design_completion_formation": "sjwzcw",
+        # drilling/completion
+        "drilling_purpose": "ztmd",
+        "completion_principle": "wzyz",
+        # dates/numbers
+        "design_date": "sjrq",
+        "design_depth_m": "sjjs",
+        "ground_elevation_m": "dmhb",
+        # location
+        "province_city": "ss",
+        "water_location": "sywz",
+        # contract
+        "contract_zone_code": "htqh",
+        # key well flag
+        "is_key_well": "sfzdj",
+        # optional legacy-ish keys
+        "well_id": "jh",
+    }
+
+    for alias_key, column_key in alias_to_column.items():
+        if column_key not in allowed_fields:
+            continue
+        # Don't overwrite any already-provided DB field values
+        if column_key in fields and fields[column_key] not in (None, ""):
+            continue
+        if alias_key not in data:
+            continue
+        raw_val = data.get(alias_key)
+        if raw_val in (None, ""):
+            continue
+
+        if column_key == "sfzdj":
+            mapped_val = parse_bool_to_sfzdj(raw_val)
+            if mapped_val:
+                fields[column_key] = mapped_val
+            continue
+        if column_key in {"sjjs", "dmhb"}:
+            mapped_val = parse_number(raw_val)
+            if mapped_val is not None:
+                fields[column_key] = mapped_val
+            continue
+
+        fields[column_key] = raw_val
+
+    # Ensure layer fallbacks: if cw is present but sjmdc is missing, set sjmdc = cw.
+    if "sjmdc" not in fields and "cw" in fields and fields["cw"] not in (None, ""):
+        fields["sjmdc"] = fields["cw"]
+
+    columns = list(fields.keys())
+    values = [fields[c] for c in columns]
+    update_columns = [c for c in columns if c != "well_name"]
+
+    conn = get_db_connection()
+    cursor = conn.cursor()
+
+    try:
+        # 1) Try update first (avoids requiring a UNIQUE constraint on well_name)
+        if update_columns:
+            update_assignments = ", ".join(f"{c} = %s" for c in update_columns)
+            update_query = f"""
+                UPDATE oil_wells
+                SET {update_assignments},
+                    updated_at = CURRENT_TIMESTAMP
+                WHERE well_name = %s
+                RETURNING id
+            """
+            update_values = [fields[c] for c in update_columns] + [well_name]
+            cursor.execute(update_query, tuple(update_values))
+        else:
+            update_query = """
+                UPDATE oil_wells
+                SET updated_at = CURRENT_TIMESTAMP
+                WHERE well_name = %s
+                RETURNING id
+            """
+            cursor.execute(update_query, (well_name,))
+
+        existing_row = cursor.fetchone()
+        if existing_row:
+            conn.commit()
+            existing_id = existing_row.get("id")
+            id_info = f"（ID: {existing_id}）" if existing_id else ""
+            logger.info(f"✅ save_well_data: 更新 井 '{well_name}' by {user_email}")
+            return (
+                f"✅ 数据已更新{id_info}：井名 **{well_name}**，写入字段 {len(update_columns)}。"
+            )
+
+        # 2) If no existing row, insert new
+        placeholders = ", ".join(["%s"] * len(columns))
+        col_str = ", ".join(columns)
+        insert_query = f"""
+            INSERT INTO oil_wells ({col_str})
+            VALUES ({placeholders})
+            RETURNING id
+        """
+        cursor.execute(insert_query, tuple(values))
+        inserted_row = cursor.fetchone()
+        conn.commit()
+
+        inserted_id = inserted_row.get("id") if inserted_row else ""
+        id_info = f"（ID: {inserted_id}）" if inserted_id else ""
+        logger.info(f"✅ save_well_data: 新增 井 '{well_name}' by {user_email}")
+        return f"✅ 数据已新增{id_info}：井名 **{well_name}**，写入字段 {len(fields)}。"
+    except Exception as e:
+        conn.rollback()
+        logger.error(f"数据库写操作失败: {e}")
+        raise
+    finally:
+        cursor.close()
+        conn.close()
+
+
 # ==========================================
 # 主程序入口
 # ==========================================
@@ -772,6 +1055,7 @@ if __name__ == "__main__":
     print("  ✓ get_wells_by_block - 按区块查询")
     print("  ✓ get_wells_by_project - 按项目查询")
     print("  ✓ get_statistics - 统计分析")
+    print("  ✓ save_well_data - 保存提取数据")
     print(f"\n🔒 权限模式: {'开发模式' if DEV_MODE else '生产模式'}")
     print(f"\n🗄️  数据库: {DB_CONFIG['host']}:{DB_CONFIG['port']}/{DB_CONFIG['database']}")
     print("\n🌐 访问地址: http://0.0.0.0:8081")
