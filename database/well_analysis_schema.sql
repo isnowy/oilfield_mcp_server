@@ -56,6 +56,8 @@ CREATE TABLE IF NOT EXISTS well_analysis (
     mineralization NUMERIC(12, 2),     -- 矿化度 (mg/L)
     total_hardness NUMERIC(12, 2),     -- 总硬度(以CaCO3计) (mg/L)
     total_alkalinity NUMERIC(12, 2),   -- 总碱度(以CaCO3计) (mg/L)
+    water_type VARCHAR(50),            -- 水型 (如重碳酸钠型)
+    density NUMERIC(10, 4),            -- 密度 20°C (g/cm³)
 
     -- 公共字段
     hyj VARCHAR(100),                  -- 化验机构
@@ -98,6 +100,8 @@ ALTER TABLE well_analysis ADD COLUMN IF NOT EXISTS oh_ion NUMERIC(12, 2);
 ALTER TABLE well_analysis ADD COLUMN IF NOT EXISTS mineralization NUMERIC(12, 2);
 ALTER TABLE well_analysis ADD COLUMN IF NOT EXISTS total_hardness NUMERIC(12, 2);
 ALTER TABLE well_analysis ADD COLUMN IF NOT EXISTS total_alkalinity NUMERIC(12, 2);
+ALTER TABLE well_analysis ADD COLUMN IF NOT EXISTS water_type VARCHAR(50);
+ALTER TABLE well_analysis ADD COLUMN IF NOT EXISTS density NUMERIC(10, 4);
 
 COMMENT ON TABLE well_analysis IS '分析化验数据表 - 气样和水样共用，yplx 字段区分';
 COMMENT ON COLUMN well_analysis.jh IS '井号';
@@ -145,6 +149,8 @@ COMMENT ON COLUMN well_analysis.oh_ion IS '氢氧根 (mg/L)';
 COMMENT ON COLUMN well_analysis.mineralization IS '矿化度 (mg/L)';
 COMMENT ON COLUMN well_analysis.total_hardness IS '总硬度(以CaCO3计) (mg/L)';
 COMMENT ON COLUMN well_analysis.total_alkalinity IS '总碱度(以CaCO3计) (mg/L)';
+COMMENT ON COLUMN well_analysis.water_type IS '水型';
+COMMENT ON COLUMN well_analysis.density IS '密度 20°C (g/cm³)';
 COMMENT ON COLUMN well_analysis.hyj IS '化验机构';
 COMMENT ON COLUMN well_analysis.bz IS '备注';
 

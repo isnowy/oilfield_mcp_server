@@ -224,6 +224,8 @@ async def handle_list_tools():
                     "mineralization": {"type": "number", "description": "矿化度 (mg/L)"},
                     "total_hardness": {"type": "number", "description": "总硬度(以CaCO3计) (mg/L)"},
                     "total_alkalinity": {"type": "number", "description": "总碱度(以CaCO3计) (mg/L)"},
+                    "water_type": {"type": "string", "description": "水型（如重碳酸钠型）"},
+                    "density": {"type": "number", "description": "密度 20°C (g/cm³)"},
                     "hyj": {"type": "string", "description": "化验机构"},
                     "bz": {"type": "string", "description": "备注"}
                 },
@@ -291,6 +293,69 @@ async def handle_list_tools():
             }
         ),
         Tool(
+            name="save_perforation_records_batch",
+            description=(
+                "批量保存射孔记录到数据库（一次调用保存多条），适用于文档中射孔记录超过30条的场景。"
+                "records_json 为 JSON 数组字符串，每个元素与 save_perforation_record 的字段相同（jh/sksj/cw 必填）。"
+                "需要 ENGINEER 或 ADMIN 角色权限。"
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "records_json": {
+                        "type": "string",
+                        "description": (
+                            "JSON 数组字符串，每个元素为一条射孔记录对象。"
+                            "示例: '[{\"jh\":\"MaX5126\",\"sksj\":\"2024-08-08\",\"cw\":\"P1f\",\"sk_top\":5063.2,\"sk_bot\":5064.2}]'"
+                        )
+                    }
+                },
+                "required": ["records_json"]
+            }
+        ),
+        Tool(
+            name="save_workover_records_batch",
+            description=(
+                "批量保存修井记录到数据库（一次调用保存多条），适用于文档中修井记录较多的场景。"
+                "records_json 为 JSON 数组字符串，每个元素与 save_workover_record 的字段相同（jh/kssj/azlx 必填）。"
+                "需要 ENGINEER 或 ADMIN 角色权限。"
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "records_json": {
+                        "type": "string",
+                        "description": (
+                            "JSON 数组字符串，每个元素为一条修井记录对象。"
+                            "示例: '[{\"jh\":\"MaX5126\",\"kssj\":\"2024-08-08\",\"azlx\":\"新投射孔压裂\"}]'"
+                        )
+                    }
+                },
+                "required": ["records_json"]
+            }
+        ),
+        Tool(
+            name="save_well_analyses_batch",
+            description=(
+                "批量保存分析化验数据到数据库（一次调用保存多条），适用于化验记录较多的场景。"
+                "records_json 为 JSON 数组字符串，每个元素与 save_well_analysis 的字段相同（jh/yplx 必填）。"
+                "需要 ENGINEER 或 ADMIN 角色权限。"
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "records_json": {
+                        "type": "string",
+                        "description": (
+                            "JSON 数组字符串，每个元素为一条化验记录对象。"
+                            "示例: '[{\"jh\":\"MaX5126\",\"yplx\":\"气样\",\"co2\":2.5}]'"
+                        )
+                    }
+                },
+                "required": ["records_json"]
+            }
+        ),
+        Tool(
             name="save_wellbore_diagram",
             description="将井身结构图的文件引用信息保存到数据库（不存储图片本身，只存储文件 ID 和元数据）。需要 ENGINEER 或 ADMIN 角色权限。",
             inputSchema={
@@ -327,6 +392,21 @@ async def handle_call_tool(name: str, arguments: dict):
             result = save_perforation_record(data=arguments, user_role=user_ctx.role, user_id=user_ctx.user_id, user_email=user_ctx.email)
         elif name == "save_wellbore_diagram":
             result = save_wellbore_diagram(data=arguments, user_role=user_ctx.role, user_id=user_ctx.user_id, user_email=user_ctx.email)
+        elif name == "save_perforation_records_batch":
+            result = save_perforation_records_batch(
+                records_json=arguments.get("records_json", "[]"),
+                user_role=user_ctx.role, user_id=user_ctx.user_id, user_email=user_ctx.email,
+            )
+        elif name == "save_workover_records_batch":
+            result = save_workover_records_batch(
+                records_json=arguments.get("records_json", "[]"),
+                user_role=user_ctx.role, user_id=user_ctx.user_id, user_email=user_ctx.email,
+            )
+        elif name == "save_well_analyses_batch":
+            result = save_well_analyses_batch(
+                records_json=arguments.get("records_json", "[]"),
+                user_role=user_ctx.role, user_id=user_ctx.user_id, user_email=user_ctx.email,
+            )
         else:
             raise ValueError(f"未知工具: {name}")
         logger.info(f"✅ 工具执行成功: {name}")
@@ -423,9 +503,9 @@ def save_well_analysis(data: dict, user_role: str = "GUEST",
         "co2", "n2", "h2s", "h2", "co", "o2",
         "molecular_weight", "standard_density", "relative_density", "high_calorific_value", "low_calorific_value", "compressibility_factor",
         "ph", "tds", "cl_ion", "so4_ion", "hco3_ion", "co3_ion", "ca_ion", "mg_ion", "na_k_ion", "oh_ion",
-        "mineralization", "total_hardness", "total_alkalinity",
+        "mineralization", "total_hardness", "total_alkalinity", "density",
     }
-    allowed = {"jh", "yplx", "qyrq", "cw", "bgbh", "ypbh", "ypmc", "qydd", "qyr", "cyrq", "hyj", "bz"} | number_fields
+    allowed = {"jh", "yplx", "qyrq", "cw", "bgbh", "ypbh", "ypmc", "qydd", "qyr", "cyrq", "hyj", "bz", "water_type"} | number_fields
 
     fields: dict = {"jh": jh, "yplx": yplx}
     for k, v in data.items():
@@ -535,6 +615,192 @@ def save_wellbore_diagram(data: dict, user_role: str = "GUEST",
     return _upsert("wellbore_diagrams", ["jh", "file_id"], fields, user_email)
 
 
+def _batch_upsert(table: str, records: list[dict], key_col_getter, field_builder, user_email: str) -> tuple[int, int, list[str]]:
+    """批量 upsert，使用单一数据库连接。返回 (成功数, 失败数, 错误列表)"""
+    ok = 0
+    fail = 0
+    errors: list[str] = []
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    try:
+        for i, rec in enumerate(records):
+            try:
+                key_cols, fields = field_builder(rec)
+                update_cols = [c for c in fields if c not in key_cols]
+                if update_cols:
+                    assignments = ", ".join(f"{c} = %s" for c in update_cols)
+                    where_clause = " AND ".join(f"{c} = %s" for c in key_cols)
+                    cursor.execute(
+                        f"UPDATE {table} SET {assignments}, updated_at = CURRENT_TIMESTAMP "
+                        f"WHERE {where_clause} RETURNING id",
+                        [fields[c] for c in update_cols] + [fields[c] for c in key_cols],
+                    )
+                else:
+                    where_clause = " AND ".join(f"{c} = %s" for c in key_cols)
+                    cursor.execute(
+                        f"UPDATE {table} SET updated_at = CURRENT_TIMESTAMP WHERE {where_clause} RETURNING id",
+                        [fields[c] for c in key_cols],
+                    )
+                if not cursor.fetchone():
+                    col_str = ", ".join(fields.keys())
+                    placeholders = ", ".join(["%s"] * len(fields))
+                    cursor.execute(
+                        f"INSERT INTO {table} ({col_str}) VALUES ({placeholders})",
+                        list(fields.values()),
+                    )
+                ok += 1
+            except Exception as e:
+                fail += 1
+                errors.append(f"第{i + 1}条: {str(e)[:120]}")
+        conn.commit()
+    except Exception as e:
+        conn.rollback()
+        raise
+    finally:
+        cursor.close()
+        conn.close()
+    return ok, fail, errors
+
+
+def _parse_batch_json(records_json: str, tool_name: str) -> tuple[list[dict] | None, str]:
+    """解析 records_json，返回 (list, "") 或 (None, error_msg)"""
+    import json as _json
+    if not records_json or records_json.strip() in ("", "[]"):
+        return None, f"❌ records_json 不能为空。"
+    try:
+        records = _json.loads(records_json)
+    except Exception:
+        return None, f"❌ records_json 不是合法的 JSON 数组。"
+    if not isinstance(records, list):
+        return None, f"❌ records_json 必须是 JSON 数组（以 [ 开头）。"
+    if len(records) == 0:
+        return None, f"❌ records_json 数组为空，没有可保存的记录。"
+    if len(records) > 500:
+        return None, f"❌ 单次最多批量保存 500 条，当前 {len(records)} 条，请拆分后多次调用。"
+    return records, ""
+
+
+@AuditLog.trace("save_perforation_records_batch")
+def save_perforation_records_batch(records_json: str, user_role: str = "GUEST",
+                                   user_id: str = "unknown", user_email: str = "unknown") -> str:
+    err = _check_write_permission(user_role)
+    if err:
+        return err
+    records, parse_err = _parse_batch_json(records_json, "save_perforation_records_batch")
+    if records is None:
+        return parse_err
+
+    number_fields = {"sk_top", "sk_bot", "skhs", "skmd", "kj", "source_row_no"}
+    allowed = {
+        "jh", "sksj", "cw", "skqx", "skfs",
+        "zccs_rq", "zccs_cw", "ylfs", "ylmc", "zylq_nql", "sl_ss", "bl_tbyl", "zccs_bz",
+        "source_file", "source_sheet", "source_row_no", "bz",
+    } | number_fields
+
+    def build(rec: dict):
+        jh = (rec.get("jh") or "").strip()
+        sksj = (rec.get("sksj") or "").strip()
+        cw = (rec.get("cw") or "").strip()
+        if not jh or not sksj or not cw:
+            raise ValueError(f"jh/sksj/cw 不能为空（当前: jh={jh!r}, sksj={sksj!r}, cw={cw!r}）")
+        fields: dict = {"jh": jh, "sksj": sksj, "cw": cw}
+        for k, v in rec.items():
+            if k in ("jh", "sksj", "cw") or k not in allowed or v is None or v == "":
+                continue
+            fields[k] = _parse_number(v) if k in number_fields else v
+        key_cols = ["jh", "sksj", "cw"]
+        if "sk_top" in fields:
+            key_cols.append("sk_top")
+        return key_cols, fields
+
+    ok, fail, errors = _batch_upsert("perforation_records", records, None, build, user_email)
+    logger.info(f"批量射孔记录: 成功={ok}, 失败={fail} by {user_email}")
+    lines = [f"✅ 批量保存射孔记录完成：共 {len(records)} 条，成功 {ok} 条，失败 {fail} 条。"]
+    if errors:
+        lines.append("⚠️ 失败明细：" + " | ".join(errors[:10]))
+    return "\n".join(lines)
+
+
+@AuditLog.trace("save_workover_records_batch")
+def save_workover_records_batch(records_json: str, user_role: str = "GUEST",
+                                user_id: str = "unknown", user_email: str = "unknown") -> str:
+    err = _check_write_permission(user_role)
+    if err:
+        return err
+    records, parse_err = _parse_batch_json(records_json, "save_workover_records_batch")
+    if records is None:
+        return parse_err
+
+    allowed = {
+        "jh", "kssj", "jssj", "azlx", "azmd", "sgnr", "sgsd", "azjg", "sgdw",
+        "rgjd", "bsqzsd", "bjqzdx", "ccyz", "cc",
+        "source_file", "source_sheet", "source_row_no", "bz",
+    }
+    number_fields = {"sgsd", "rgjd", "source_row_no"}
+
+    def build(rec: dict):
+        jh = (rec.get("jh") or "").strip()
+        kssj = (rec.get("kssj") or "").strip()
+        azlx = (rec.get("azlx") or "").strip()
+        if not jh or not kssj or not azlx:
+            raise ValueError(f"jh/kssj/azlx 不能为空（当前: jh={jh!r}, kssj={kssj!r}, azlx={azlx!r}）")
+        fields: dict = {"jh": jh, "kssj": kssj, "azlx": azlx}
+        for k, v in rec.items():
+            if k in ("jh", "kssj", "azlx") or k not in allowed or v is None or v == "":
+                continue
+            fields[k] = _parse_number(v) if k in number_fields else v
+        return ["jh", "kssj", "azlx"], fields
+
+    ok, fail, errors = _batch_upsert("workover_records", records, None, build, user_email)
+    logger.info(f"批量修井记录: 成功={ok}, 失败={fail} by {user_email}")
+    lines = [f"✅ 批量保存修井记录完成：共 {len(records)} 条，成功 {ok} 条，失败 {fail} 条。"]
+    if errors:
+        lines.append("⚠️ 失败明细：" + " | ".join(errors[:10]))
+    return "\n".join(lines)
+
+
+@AuditLog.trace("save_well_analyses_batch")
+def save_well_analyses_batch(records_json: str, user_role: str = "GUEST",
+                             user_id: str = "unknown", user_email: str = "unknown") -> str:
+    err = _check_write_permission(user_role)
+    if err:
+        return err
+    records, parse_err = _parse_batch_json(records_json, "save_well_analyses_batch")
+    if records is None:
+        return parse_err
+
+    number_fields = {
+        "ch4", "c2h6", "c3h8", "c4h10", "c5h12", "ic4h10", "nc4h10", "ic5h12", "nc5h12", "c6_plus",
+        "co2", "n2", "h2s", "h2", "co", "o2",
+        "molecular_weight", "standard_density", "relative_density",
+        "high_calorific_value", "low_calorific_value", "compressibility_factor",
+        "ph", "tds", "cl_ion", "so4_ion", "hco3_ion", "co3_ion", "ca_ion", "mg_ion",
+        "na_k_ion", "oh_ion", "mineralization", "total_hardness", "total_alkalinity", "density",
+    }
+    allowed = {"jh", "yplx", "qyrq", "cw", "bgbh", "ypbh", "ypmc", "qydd", "qyr", "cyrq", "hyj", "bz", "water_type"} | number_fields
+
+    def build(rec: dict):
+        jh = (rec.get("jh") or "").strip()
+        yplx = (rec.get("yplx") or "").strip()
+        if not jh or not yplx:
+            raise ValueError(f"jh/yplx 不能为空（当前: jh={jh!r}, yplx={yplx!r}）")
+        fields: dict = {"jh": jh, "yplx": yplx}
+        for k, v in rec.items():
+            if k in ("jh", "yplx") or k not in allowed or v is None or v == "":
+                continue
+            fields[k] = _parse_number(v) if k in number_fields else v
+        key_cols_order = ["jh", "qyrq", "yplx", "cw"]
+        key_cols = [c for c in key_cols_order if c in fields]
+        return key_cols, fields
+
+    ok, fail, errors = _batch_upsert("well_analysis", records, None, build, user_email)
+    logger.info(f"批量化验记录: 成功={ok}, 失败={fail} by {user_email}")
+    lines = [f"✅ 批量保存化验记录完成：共 {len(records)} 条，成功 {ok} 条，失败 {fail} 条。"]
+    if errors:
+        lines.append("⚠️ 失败明细：" + " | ".join(errors[:10]))
+    return "\n".join(lines)
+
+
 # ==========================================
 # 主程序入口
 # ==========================================
@@ -551,10 +817,13 @@ if __name__ == "__main__":
     print("🚀 油田作业数据 MCP Server")
     print("=" * 60)
     print("\n📌 提供工具：")
-    print("  ✓ save_well_analysis - 保存分析化验数据")
-    print("  ✓ save_workover_record - 保存修井记录")
-    print("  ✓ save_perforation_record - 保存射孔记录")
-    print("  ✓ save_wellbore_diagram - 保存井身结构图引用")
+    print("  ✓ save_well_analysis        - 保存分析化验数据（单条）")
+    print("  ✓ save_well_analyses_batch  - 批量保存分析化验数据")
+    print("  ✓ save_workover_record      - 保存修井记录（单条）")
+    print("  ✓ save_workover_records_batch - 批量保存修井记录")
+    print("  ✓ save_perforation_record   - 保存射孔记录（单条）")
+    print("  ✓ save_perforation_records_batch - 批量保存射孔记录（最多500条/次）")
+    print("  ✓ save_wellbore_diagram     - 保存井身结构图引用")
     print(f"\n🔒 权限模式: {'开发模式' if DEV_MODE else '生产模式'}")
     print(f"\n🗄️  数据库: {DB_CONFIG['host']}:{DB_CONFIG['port']}/{DB_CONFIG['database']}")
     print("\n🌐 访问地址: http://0.0.0.0:8083")
